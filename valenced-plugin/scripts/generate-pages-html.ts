@@ -15,7 +15,7 @@ interface IndexJson {
   >
 }
 
-const DEFAULT_BASE_URL = 'https://horndogcop.github.io'
+const DEFAULT_BASE_URL = 'https://horndogcop.github.io/valenced-plugins'
 
 function escapeHtml(text: string): string {
   return text
