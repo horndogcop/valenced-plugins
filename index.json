@@ -1,0 +1,76 @@
+{
+  "format": 1,
+  "name": "horndogcop's Valenced Plugins",
+  "description": "Valenced plugins by horndogcop: Hide User Content, Mention Block, and Negative Search Filters.",
+  "plugins": {
+    "com.valenced.hide-user-content": {
+      "name": "Hide User Content",
+      "description": "Adds a user context menu item to hide or blur images and spoiler-wrap message blocks from selected users.",
+      "author": "horndogcop",
+      "channels": {
+        "latest": "1.0.0"
+      },
+      "versions": {
+        "1.0.0": {
+          "url": "https://horndogcop.github.io/valenced-plugins/pool/com.valenced.hide-user-content@1.0.0.zip",
+          "sha256": "61322d318b78eb4300a2625b126dc4031312d0d6ed245fca7e7f1bfc1cd31068",
+          "size": 4247,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
+    "com.valenced.mention-block": {
+      "name": "Mention Block",
+      "description": "Intercepts @user and #channel mention autocomplete to block users and channels from suggestions via context menus and commands.",
+      "author": "horndogcop",
+      "channels": {
+        "latest": "1.0.0"
+      },
+      "versions": {
+        "1.0.0": {
+          "url": "https://horndogcop.github.io/valenced-plugins/pool/com.valenced.mention-block@1.0.0.zip",
+          "sha256": "ac0ae066499556abfec31ec00384711b7a3a1cd4fa44f1934c923761c9bd0454",
+          "size": 4351,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
+    "com.valenced.negative-search-filters": {
+      "name": "Negative Search Filters",
+      "description": "Adds repeatable client-side negative inline search filters (-from:, -in:, -has:image, -has:embed, etc.) to Discord mobile search.",
+      "author": "horndogcop",
+      "channels": {
+        "latest": "1.0.0"
+      },
+      "versions": {
+        "1.0.0": {
+          "url": "https://horndogcop.github.io/valenced-plugins/pool/com.valenced.negative-search-filters@1.0.0.zip",
+          "sha256": "5aac9ac1429bcb26ad169fc3c1630703a814c14b6110e88e3e56f7d42a6d2a26",
+          "size": 3981,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    }
+  }
+}
