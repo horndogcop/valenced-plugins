@@ -1,0 +1,22 @@
+{
+  "name": "@valenced/hide-user-content-repo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "valenced-plugin build",
+    "build:dev": "valenced-plugin build --dev",
+    "generate-index": "valenced-plugin generate-index",
+    "serve": "valenced-plugin serve",
+    "lint:types": "tsc -b plugins/*/tsconfig.json"
+  },
+  "dependencies": {
+    "@valenced/plugin-cli": "git+https://github.com/Valenced/valenced-plugin-cli.git",
+    "@valenced/types": "git+https://github.com/Valenced/valenced-types.git"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.0.0",
+    "react-native": "0.81.6",
+    "typescript": "^7.0.2"
+  }
+}
