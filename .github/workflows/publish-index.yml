@@ -12,7 +12,7 @@ permissions:
 
 env:
   POOL_BRANCH: ${{ vars.POOL_BRANCH || 'gh-pages' }}
-  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL || 'https://horndogcop.github.io' }}
 
 jobs:
   publish-index:
@@ -71,12 +71,17 @@ jobs:
             --dist "$POOL_DIR/pool" \
             --base-url "${BASE_URL}/pool" \
             --out "$POOL_DIR/index.json"
+          bun run --bun generate-pages \
+            --readme "${GITHUB_WORKSPACE}/README.md" \
+            --index "$POOL_DIR/index.json" \
+            --base-url "${BASE_URL}" \
+            --out "$POOL_DIR/index.html"
 
-          git -C "$POOL_DIR" add .nojekyll pool index.json
+          git -C "$POOL_DIR" add .nojekyll pool index.json index.html
           if git -C "$POOL_DIR" diff --cached --quiet; then
-            echo "Index already matches the pool."
+            echo "Index and page already match the pool."
             exit 0
           fi
 
-          git -C "$POOL_DIR" commit -m "Regenerate repository index"
+          git -C "$POOL_DIR" commit -m "Regenerate repository index and page"
           git -C "$POOL_DIR" push origin "$POOL_BRANCH"

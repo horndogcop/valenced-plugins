@@ -7,6 +7,7 @@ on:
       - 'plugins/**'
       - 'scripts/**'
       - 'repo.config.json'
+      - 'README.md'
       - '.github/workflows/validate-plugins.yml'
 
 jobs:
@@ -44,11 +45,16 @@ jobs:
         working-directory: ${{ steps.paths.outputs.root }}
         run: bun run --bun package
 
-      - name: Validate repository index generation
+      - name: Validate repository index and pages HTML generation
         working-directory: ${{ steps.paths.outputs.root }}
         run: |
           bun run --bun generate-index \
             --dist build/dist \
             --base-url https://valenced.local/pool \
             --out /tmp/index.json
+          bun run --bun generate-pages \
+            --readme "${GITHUB_WORKSPACE}/README.md" \
+            --index /tmp/index.json \
+            --base-url https://valenced.local \
+            --out /tmp/index.html
           cat /tmp/index.json

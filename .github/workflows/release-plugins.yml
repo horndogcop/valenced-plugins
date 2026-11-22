@@ -8,6 +8,7 @@ on:
       - 'plugins/**'
       - 'scripts/**'
       - 'repo.config.json'
+      - 'README.md'
       - '.github/workflows/release-plugins.yml'
   workflow_dispatch:
 
@@ -20,7 +21,7 @@ permissions:
 
 env:
   POOL_BRANCH: ${{ vars.POOL_BRANCH || 'gh-pages' }}
-  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL || 'https://horndogcop.github.io' }}
 
 jobs:
   release:
@@ -131,15 +132,20 @@ jobs:
               --dist "$POOL_DIR/pool" \
               --base-url "${BASE_URL}/pool" \
               --out "$POOL_DIR/index.json"
-            git -C "$POOL_DIR" add .nojekyll pool index.json
+            bun run --bun generate-pages \
+              --readme "${GITHUB_WORKSPACE}/README.md" \
+              --index "$POOL_DIR/index.json" \
+              --base-url "${BASE_URL}" \
+              --out "$POOL_DIR/index.html"
+            git -C "$POOL_DIR" add .nojekyll pool index.json index.html
             if git -C "$POOL_DIR" diff --cached --quiet; then
-              echo "Pool and index.json are already up to date."
+              echo "Pool, index.json, and index.html are already up to date."
               return 0
             fi
             if [ "$COUNT" != "0" ]; then
               git -C "$POOL_DIR" commit -m "Publish ${COUNT} plugin release(s)"
             else
-              git -C "$POOL_DIR" commit -m "Update plugin repository index"
+              git -C "$POOL_DIR" commit -m "Update plugin repository index and page"
             fi
             git -C "$POOL_DIR" push origin "$POOL_BRANCH"
           }
@@ -183,6 +189,7 @@ jobs:
           path: |
             ${{ steps.paths.outputs.root }}/build/dist/*.zip
             ${{ steps.pool.outputs.dir }}/index.json
+            ${{ steps.pool.outputs.dir }}/index.html
           if-no-files-found: ignore
 
       - name: Write job summary
