@@ -6,11 +6,44 @@ import { SourceExplorer } from './components/SourceExplorer'
 import { PLUGIN_SOURCE_FILES } from './data/pluginFiles'
 import { buildZipBlob } from './utils/zipBuilder'
 import type {
-  PluginSettings,
+  MentionBlockStorage,
   SimChannel,
+  SimGuild,
   SimMessage,
   SimUser,
 } from './types/simulator'
+
+const GUILDS: SimGuild[] = [
+  { id: 'g-1', name: 'Valenced Lab', shortName: 'Valenced Lab' },
+  { id: 'g-2', name: 'Photo Archive', shortName: 'Photo Archive' },
+]
+
+const CHANNELS: SimChannel[] = [
+  {
+    id: 'ch-101',
+    guildId: 'g-1',
+    name: 'general',
+    topic: 'General chat · test @user and #channel autocomplete here',
+  },
+  {
+    id: 'ch-102',
+    guildId: 'g-1',
+    name: 'dev-chat',
+    topic: 'Plugin development & Valenced Metro hooks',
+  },
+  {
+    id: 'ch-201',
+    guildId: 'g-2',
+    name: 'lounge',
+    topic: 'Archive server · compare /mention-list scoping per server',
+  },
+  {
+    id: 'ch-202',
+    guildId: 'g-2',
+    name: 'raw-shots',
+    topic: 'Uncompressed film scans & camera roll',
+  },
+]
 
 const USERS: Record<string, SimUser> = {
   '948271640192843776': {
@@ -19,6 +52,8 @@ const USERS: Record<string, SimUser> = {
     displayName: 'Maya',
     roleColor: '#8EA1E1',
     avatar: '/src/assets/images/avatar_user_maya_1795329072457.jpg',
+    bio: 'Member of Valenced Lab only',
+    guildIds: ['g-1'],
   },
   '712904831249012736': {
     id: '712904831249012736',
@@ -26,180 +61,135 @@ const USERS: Record<string, SimUser> = {
     displayName: 'Kaito',
     roleColor: '#6EE7B7',
     avatar: '/src/assets/images/avatar_user_kaito_1795329072613.jpg',
+    bio: 'Member of both Valenced Lab and Photo Archive',
+    guildIds: ['g-1', 'g-2'],
+  },
+  '551029384756102938': {
+    id: '551029384756102938',
+    username: 'sora_film',
+    displayName: 'Sora',
+    roleColor: '#FDBA74',
+    avatar: '/src/assets/images/chat_photo_alpine_1795329072329.jpg',
+    bio: 'Member of Photo Archive only',
+    guildIds: ['g-2'],
   },
 }
 
-const CHANNELS: SimChannel[] = [
-  {
-    id: 'ch-general',
-    name: 'general',
-    nsfw: false,
-    topic: 'Standard channel · casual photography & Valenced dev talk',
-  },
-  {
-    id: 'ch-nsfw',
-    name: 'after-hours-art',
-    nsfw: true,
-    topic: 'NSFW channel · age-restricted media and late-night photography',
-  },
-]
-
-const MESSAGES: SimMessage[] = [
+const INITIAL_MESSAGES: SimMessage[] = [
   {
     id: 'msg-1',
-    channelId: 'ch-general',
-    authorId: '712904831249012736',
-    timestamp: '22:14',
-    isSilent: true,
-    segments: [
-      {
-        type: 'text',
-        value:
-          'Sent this one with @silent so nobody gets pinged. Notice the muted bell right after the timestamp.',
-      },
-    ],
+    channelId: 'ch-101',
+    authorId: '948271640192843776',
+    timestamp: '22:48',
+    content:
+      'Type @ or # below to test mention autocomplete. Right now I am blocked from suggestions.',
   },
   {
     id: 'msg-2',
-    channelId: 'ch-general',
-    authorId: '948271640192843776',
-    timestamp: '22:18',
-    segments: [
-      {
-        type: 'text',
-        value: 'Reached the upper ridge right before blue hour — ',
-      },
-      {
-        type: 'spoiler',
-        value: 'trail coordinates: 46.5472° N',
-      },
-      {
-        type: 'text',
-        value: '. Look at how still the water stayed.',
-      },
-    ],
-    image: {
-      url: '/src/assets/images/chat_photo_alpine_1795329072329.jpg',
-      alt: 'Alpine mountain lake at twilight',
-      filename: 'alpine_blue_hour.jpg',
-      dimensions: '1440 × 1080',
-    },
+    channelId: 'ch-101',
+    authorId: '712904831249012736',
+    timestamp: '22:51',
+    content:
+      'Tap ⋯ on any message for BOTH user and channel entries, or tap my avatar for my User Profile.',
   },
   {
     id: 'msg-3',
-    channelId: 'ch-general',
+    channelId: 'ch-102',
     authorId: '712904831249012736',
-    timestamp: '22:21',
-    segments: [
-      {
-        type: 'text',
-        value:
-          'Tap any username or avatar to toggle Hide User Content from their context menu.',
-      },
-    ],
+    timestamp: '22:52',
+    content: 'This channel (#dev-chat) is blocked from #channel autocomplete by default.',
   },
   {
     id: 'msg-4',
-    channelId: 'ch-nsfw',
-    authorId: '948271640192843776',
-    timestamp: '22:24',
-    segments: [
-      {
-        type: 'text',
-        value: 'Night walk through the concrete courtyard — ',
-      },
-      {
-        type: 'spoiler',
-        value: 'shot on 35mm Cinestill 800T',
-      },
-      {
-        type: 'text',
-        value: ' after the rain cleared.',
-      },
-    ],
-    image: {
-      url: '/src/assets/images/chat_artwork_courtyard_1795329073205.jpg',
-      alt: 'Rainy brutalist concrete courtyard at night',
-      filename: 'courtyard_800t.jpg',
-      dimensions: '1440 × 1080',
-    },
+    channelId: 'ch-201',
+    authorId: '551029384756102938',
+    timestamp: '22:49',
+    content:
+      'Welcome to Photo Archive. Run /mention-list to verify it only lists blocked users and channels from this server.',
   },
   {
     id: 'msg-5',
-    channelId: 'ch-nsfw',
+    channelId: 'ch-202',
     authorId: '712904831249012736',
-    timestamp: '22:26',
-    isSilent: true,
-    segments: [
-      {
-        type: 'text',
-        value:
-          'Channel is marked NSFW — toggle "Only in NSFW channels" to compare with #general.',
-      },
-    ],
+    timestamp: '22:53',
+    content: 'This is #raw-shots in Photo Archive.',
   },
 ]
 
+const INITIAL_STORAGE: MentionBlockStorage = {
+  blockedUsers: {
+    '948271640192843776': true,
+  },
+  blockedChannels: {
+    'ch-102': true,
+  },
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'source'>('simulator')
-  const [activeChannelId, setActiveChannelId] = useState('ch-general')
-  const [settings, setSettings] = useState<PluginSettings>({
-    imageMode: 'hidden',
-    nsfwOnly: false,
-    hideText: false,
-    hiddenUsers: {
-      '948271640192843776': true,
-    },
-  })
-  const [revealedBlocks, setRevealedBlocks] = useState<Record<string, boolean>>({})
-  const [displayedImages, setDisplayedImages] = useState<Record<string, boolean>>({})
-  const [revealedInlineSpoilers, setRevealedInlineSpoilers] = useState<
-    Record<string, boolean>
-  >({})
+  const [activeGuildId, setActiveGuildId] = useState('g-1')
+  const [activeChannelId, setActiveChannelId] = useState('ch-101')
+  const [storage, setStorage] = useState<MentionBlockStorage>(INITIAL_STORAGE)
+  const [messages, setMessages] = useState<SimMessage[]>(INITIAL_MESSAGES)
+  const [composerDraft, setComposerDraft] = useState('')
 
-  const handleUpdateSettings = (patch: Partial<PluginSettings>) => {
-    setSettings(prev => ({ ...prev, ...patch }))
+  const handleSelectGuild = (guildId: string) => {
+    setActiveGuildId(guildId)
+    const firstChannel = CHANNELS.find(c => c.guildId === guildId)
+    if (firstChannel) setActiveChannelId(firstChannel.id)
   }
 
-  const handleToggleUserHidden = (userId: string) => {
-    setSettings(prev => {
-      const nextUsers = { ...prev.hiddenUsers }
-      if (nextUsers[userId]) {
-        delete nextUsers[userId]
-      } else {
-        nextUsers[userId] = true
-      }
-      return { ...prev, hiddenUsers: nextUsers }
+  const handleToggleUserBlocked = (userId: string): boolean => {
+    const nextVal = !storage.blockedUsers[userId]
+    setStorage(prev => {
+      const nextUsers = { ...prev.blockedUsers }
+      if (nextVal) nextUsers[userId] = true
+      else delete nextUsers[userId]
+      return { ...prev, blockedUsers: nextUsers }
+    })
+    return nextVal
+  }
+
+  const handleToggleChannelBlocked = (channelId: string): boolean => {
+    const nextVal = !storage.blockedChannels[channelId]
+    setStorage(prev => {
+      const nextChannels = { ...prev.blockedChannels }
+      if (nextVal) nextChannels[channelId] = true
+      else delete nextChannels[channelId]
+      return { ...prev, blockedChannels: nextChannels }
+    })
+    return nextVal
+  }
+
+  const handleSetUserBlocked = (userId: string, blocked: boolean) => {
+    setStorage(prev => {
+      const nextUsers = { ...prev.blockedUsers }
+      if (blocked) nextUsers[userId] = true
+      else delete nextUsers[userId]
+      return { ...prev, blockedUsers: nextUsers }
     })
   }
 
-  const handleToggleImageIndicator = (messageId: string) => {
-    setDisplayedImages(prev => {
-      const nextVal = !prev[messageId]
-      if (nextVal && settings.hideText) {
-        setRevealedBlocks(rb => ({ ...rb, [messageId]: true }))
-      }
-      return { ...prev, [messageId]: nextVal }
+  const handleSetChannelBlocked = (channelId: string, blocked: boolean) => {
+    setStorage(prev => {
+      const nextChannels = { ...prev.blockedChannels }
+      if (blocked) nextChannels[channelId] = true
+      else delete nextChannels[channelId]
+      return { ...prev, blockedChannels: nextChannels }
     })
-  }
-
-  const handleResetTransient = () => {
-    setRevealedBlocks({})
-    setDisplayedImages({})
-    setRevealedInlineSpoilers({})
   }
 
   const handleDownloadZip = () => {
     const blob = buildZipBlob(
       PLUGIN_SOURCE_FILES.map(file => ({
-        path: `valenced-hide-user-content/${file.path}`,
+        path: `valenced-mention-block/${file.path}`,
         content: file.content,
       })),
     )
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'valenced-hide-user-content.zip'
+    link.download = 'valenced-mention-block.zip'
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -212,7 +202,7 @@ export default function App() {
       <header className="border-b border-white/[0.08] bg-[#12151D]">
         <div className="mx-auto flex max-w-[1240px] items-center justify-between gap-8 px-6 py-4">
           <span className="font-display text-base font-semibold tracking-tight text-white whitespace-nowrap shrink-0">
-            Valenced · Hide User Content
+            Valenced · Mention Block
           </span>
 
           <nav className="flex items-center gap-6 text-sm font-medium">
@@ -255,55 +245,56 @@ export default function App() {
         <div className="mb-8 flex flex-col justify-between gap-4 border-b border-white/[0.06] pb-6 md:flex-row md:items-end">
           <div>
             <div className="text-xs text-slate-400">
-              <span>com.valenced.hide-user-content</span>
+              <span>com.valenced.mention-block</span>
               <span aria-hidden="true" className="mx-2">·</span>
               <span>by horndogcop</span>
               <span aria-hidden="true" className="mx-2">·</span>
               <span className="font-mono">v1.0.0</span>
             </div>
             <h1 className="mt-2 font-display text-2xl font-semibold tracking-tight text-white [text-wrap:balance]">
-              User Content Hiding Plugin for Valenced
+              Mention Autocomplete Blocker for Valenced
             </h1>
           </div>
           <p className="max-w-md text-sm leading-relaxed text-slate-400">
-            Adds a user context menu toggle, strict 3-option settings, a post-timestamp media indicator, and full-block spoilers with whitespace collapse.
+            Intercepts @user and #channel autocomplete suggestions, managed strictly via message, channel, and profile context menus plus slash commands.
           </p>
         </div>
 
         {activeTab === 'simulator' ? (
           <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[420px_1fr]">
             <DiscordSimulator
-              settings={settings}
-              users={USERS}
+              storage={storage}
+              guilds={GUILDS}
               channels={CHANNELS}
-              messages={MESSAGES}
+              users={USERS}
+              messages={messages}
+              activeGuildId={activeGuildId}
               activeChannelId={activeChannelId}
-              revealedBlocks={revealedBlocks}
-              displayedImages={displayedImages}
-              revealedInlineSpoilers={revealedInlineSpoilers}
+              composerDraft={composerDraft}
+              onComposerDraftChange={setComposerDraft}
+              onSelectGuild={handleSelectGuild}
               onSelectChannel={setActiveChannelId}
-              onToggleUserHidden={handleToggleUserHidden}
-              onRevealBlock={messageId =>
-                setRevealedBlocks(prev => ({ ...prev, [messageId]: true }))
-              }
-              onCollapseBlock={messageId =>
-                setRevealedBlocks(prev => ({ ...prev, [messageId]: false }))
-              }
-              onToggleImageIndicator={handleToggleImageIndicator}
-              onToggleInlineSpoiler={spoilerKey =>
-                setRevealedInlineSpoilers(prev => ({
-                  ...prev,
-                  [spoilerKey]: !prev[spoilerKey],
-                }))
-              }
+              onToggleUserBlocked={handleToggleUserBlocked}
+              onToggleChannelBlocked={handleToggleChannelBlocked}
+              onSetUserBlocked={handleSetUserBlocked}
+              onSetChannelBlocked={handleSetChannelBlocked}
+              onAppendMessage={msg => setMessages(prev => [...prev, msg])}
             />
 
             <SettingsPanel
-              settings={settings}
+              storage={storage}
               users={USERS}
-              onUpdateSettings={handleUpdateSettings}
-              onToggleUserHidden={handleToggleUserHidden}
-              onResetTransient={handleResetTransient}
+              channels={CHANNELS}
+              guilds={GUILDS}
+              activeGuildId={activeGuildId}
+              onResetStorage={() => {
+                setStorage(INITIAL_STORAGE)
+                setMessages(INITIAL_MESSAGES)
+                setComposerDraft('')
+              }}
+              onQuickCommand={draft => {
+                setComposerDraft(draft)
+              }}
             />
           </div>
         ) : (

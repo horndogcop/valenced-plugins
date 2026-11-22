@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "com.valenced.mention-block",
+  "name": "Mention Block",
+  "description": "Intercepts @user and #channel mention autocomplete to block users and channels from suggestions via context menus and commands.",
+  "author": "horndogcop",
+  "version": "1.0.0",
+  "dependencies": {
+    "valenced.api": {
+      "version": ">=1 <2"
+    },
+    "discord": {
+      "version": "*"
+    }
+  },
+  "dist": {
+    "script": "index.js"
+  }
+}

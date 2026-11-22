@@ -1,30 +1,24 @@
-export type ImageDisplayMode = 'hidden' | 'blurred'
-
-export interface PluginSettings {
-  imageMode: ImageDisplayMode
-  nsfwOnly: boolean
-  hideText: boolean
-  hiddenUsers: Record<string, boolean>
-}
-
 export interface SimUser {
   id: string
   username: string
   displayName: string
   roleColor: string
   avatar: string
+  bio: string
+  guildIds: string[]
+}
+
+export interface SimGuild {
+  id: string
+  name: string
+  shortName: string
 }
 
 export interface SimChannel {
   id: string
+  guildId: string
   name: string
-  nsfw: boolean
   topic: string
-}
-
-export interface MessageSegment {
-  type: 'text' | 'spoiler'
-  value: string
 }
 
 export interface SimMessage {
@@ -32,12 +26,13 @@ export interface SimMessage {
   channelId: string
   authorId: string
   timestamp: string
-  isSilent?: boolean
-  segments: MessageSegment[]
-  image?: {
-    url: string
-    alt: string
-    filename: string
-    dimensions: string
-  }
+  content: string
+  isEphemeral?: boolean
+  ephemeralChannels?: string[]
+  ephemeralUsers?: string[]
+}
+
+export interface MentionBlockStorage {
+  blockedUsers: Record<string, boolean>
+  blockedChannels: Record<string, boolean>
 }

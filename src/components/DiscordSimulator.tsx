@@ -1,66 +1,78 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AtSign,
-  BellOff,
-  Eye,
-  EyeOff,
+  Ban,
+  CheckCircle2,
   Hash,
   MoreHorizontal,
-  ShieldAlert,
+  Send,
+  ShieldCheck,
+  SlidersHorizontal,
   User,
   X,
 } from 'lucide-react'
 import type {
-  PluginSettings,
+  MentionBlockStorage,
   SimChannel,
+  SimGuild,
   SimMessage,
   SimUser,
 } from '../types/simulator'
 
 interface DiscordSimulatorProps {
-  settings: PluginSettings
-  users: Record<string, SimUser>
+  storage: MentionBlockStorage
+  guilds: SimGuild[]
   channels: SimChannel[]
+  users: Record<string, SimUser>
   messages: SimMessage[]
+  activeGuildId: string
   activeChannelId: string
-  revealedBlocks: Record<string, boolean>
-  displayedImages: Record<string, boolean>
-  revealedInlineSpoilers: Record<string, boolean>
+  composerDraft: string
+  onComposerDraftChange: (val: string) => void
+  onSelectGuild: (guildId: string) => void
   onSelectChannel: (channelId: string) => void
-  onToggleUserHidden: (userId: string) => void
-  onRevealBlock: (messageId: string) => void
-  onCollapseBlock: (messageId: string) => void
-  onToggleImageIndicator: (messageId: string) => void
-  onToggleInlineSpoiler: (spoilerKey: string) => void
+  onToggleUserBlocked: (userId: string) => boolean
+  onToggleChannelBlocked: (channelId: string) => boolean
+  onSetUserBlocked: (userId: string, blocked: boolean) => void
+  onSetChannelBlocked: (channelId: string, blocked: boolean) => void
+  onAppendMessage: (msg: SimMessage) => void
 }
 
+type SheetMode =
+  | { kind: 'message'; message: SimMessage }
+  | { kind: 'channel'; channel: SimChannel }
+  | { kind: 'profile'; user: SimUser }
+  | null
+
 export function DiscordSimulator({
-  settings,
-  users,
+  storage,
+  guilds,
   channels,
+  users,
   messages,
+  activeGuildId,
   activeChannelId,
-  revealedBlocks,
-  displayedImages,
-  revealedInlineSpoilers,
+  composerDraft,
+  onComposerDraftChange,
+  onSelectGuild,
   onSelectChannel,
-  onToggleUserHidden,
-  onRevealBlock,
-  onCollapseBlock,
-  onToggleImageIndicator,
-  onToggleInlineSpoiler,
+  onToggleUserBlocked,
+  onToggleChannelBlocked,
+  onSetUserBlocked,
+  onSetChannelBlocked,
+  onAppendMessage,
 }: DiscordSimulatorProps) {
-  const [sheetUserId, setSheetUserId] = useState<string | null>(null)
-  const [lightboxImage, setLightboxImage] = useState<{
-    url: string
-    alt: string
-    filename: string
-    dimensions: string
-  } | null>(null)
+  const [sheet, setSheet] = useState<SheetMode>(null)
   const [toastText, setToastText] = useState<string | null>(null)
 
+  const guildChannels = channels.filter(c => c.guildId === activeGuildId)
   const activeChannel =
-    channels.find(c => c.id === activeChannelId) ?? channels[0]
+    guildChannels.find(c => c.id === activeChannelId) ?? guildChannels[0]
+  const activeGuild = guilds.find(g => g.id === activeGuildId) ?? guilds[0]
+  const guildUsers = Object.values(users).filter(u =>
+    u.guildIds.includes(activeGuild.id),
+  )
+
   const channelMessages = messages.filter(
     m => m.channelId === activeChannel.id,
   )
@@ -72,32 +84,226 @@ export function DiscordSimulator({
     }, 2200)
   }
 
-  const handleActionSheetToggle = (userId: string) => {
-    const user = users[userId]
-    const wasHidden = Boolean(settings.hiddenUsers[userId])
-    onToggleUserHidden(userId)
-    setSheetUserId(null)
-    if (user) {
-      showToast(
-        wasHidden
-          ? `Showing content from ${user.displayName}`
-          : `Hiding content from ${user.displayName}`,
-      )
+  // Detect active slash command & mention autocomplete trigger in composerDraft
+  const trimmedDraft = composerDraft.trimStart()
+  const isRemoveCommand = trimmedDraft.startsWith('/mention-remove')
+  const isAddCommand = trimmedDraft.startsWith('/mention-add')
+  const bypassInterception = isRemoveCommand
+
+  const slashQueryMatch = trimmedDraft.match(/^\/([a-z-]*)$/)
+  const subcommandMatch = trimmedDraft.match(
+    /^\/(mention-add|mention-remove)\s+([a-z]*)$/,
+  )
+  const mentionTriggerMatch = composerDraft.match(/(^|\s)([@#])([^\s@#]*)$/)
+
+  const slashCommands = [
+    {
+      name: 'mention-add',
+      usage: '/mention-add user | channel <target>',
+      desc: 'Block user or channel from autocomplete (accepts intercepted mentions)',
+    },
+    {
+      name: 'mention-remove',
+      usage: '/mention-remove user | channel <target>',
+      desc: 'Restore user or channel (bypasses autocomplete interception)',
+    },
+    {
+      name: 'mention-list',
+      usage: '/mention-list',
+      desc: 'Ephemeral list of blocked users & channels in this server',
+    },
+  ]
+
+  const matchingSlashCommands = slashQueryMatch
+    ? slashCommands.filter(c => c.name.startsWith(slashQueryMatch[1]))
+    : []
+
+  const matchingSubcommands = subcommandMatch
+    ? ['user', 'channel'].filter(s => s.startsWith(subcommandMatch[2]))
+    : []
+
+  const mentionKind = mentionTriggerMatch?.[2] as '@' | '#' | undefined
+  const mentionQuery = (mentionTriggerMatch?.[3] ?? '').toLowerCase()
+
+  const userSuggestions =
+    mentionKind === '@'
+      ? guildUsers.filter(u => {
+          const matchesQuery =
+            u.username.toLowerCase().includes(mentionQuery) ||
+            u.displayName.toLowerCase().includes(mentionQuery)
+          if (!matchesQuery) return false
+          if (bypassInterception) return true
+          return !storage.blockedUsers[u.id]
+        })
+      : []
+
+  const channelSuggestions =
+    mentionKind === '#'
+      ? guildChannels.filter(c => {
+          const matchesQuery = c.name.toLowerCase().includes(mentionQuery)
+          if (!matchesQuery) return false
+          if (bypassInterception) return true
+          return !storage.blockedChannels[c.id]
+        })
+      : []
+
+  const applySuggestion = (token: string) => {
+    if (slashQueryMatch) {
+      if (token === 'mention-list') {
+        onComposerDraftChange('/mention-list')
+      } else {
+        onComposerDraftChange(`/${token} `)
+      }
+      return
+    }
+    if (subcommandMatch) {
+      const prefix = subcommandMatch[1]
+      const nextMention = token === 'user' ? '@' : '#'
+      onComposerDraftChange(`/${prefix} ${token} ${nextMention}`)
+      return
+    }
+    if (mentionTriggerMatch) {
+      const idx = composerDraft.lastIndexOf(mentionTriggerMatch[2])
+      const before = composerDraft.slice(0, idx)
+      onComposerDraftChange(`${before}${token} `)
     }
   }
 
-  const sheetUser = sheetUserId ? users[sheetUserId] : null
-  const sheetUserHidden = sheetUserId
-    ? Boolean(settings.hiddenUsers[sheetUserId])
-    : false
+  const resolveUserTarget = (raw: string): SimUser | undefined => {
+    const clean = raw.replace(/^<@!?|>$|^@/g, '').trim().toLowerCase()
+    return Object.values(users).find(
+      u =>
+        u.id === clean ||
+        u.username.toLowerCase() === clean ||
+        u.displayName.toLowerCase() === clean,
+    )
+  }
+
+  const resolveChannelTarget = (raw: string): SimChannel | undefined => {
+    const clean = raw.replace(/^<#|>$|^#/g, '').trim().toLowerCase()
+    return channels.find(
+      c => c.id === clean || c.name.toLowerCase() === clean,
+    )
+  }
+
+  const pushEphemeral = (
+    content: string,
+    extra?: { ephemeralChannels?: string[]; ephemeralUsers?: string[] },
+  ) => {
+    onAppendMessage({
+      id: `ephemeral-${Date.now()}`,
+      channelId: activeChannel.id,
+      authorId: 'clyde',
+      timestamp: 'Now',
+      content,
+      isEphemeral: true,
+      ...extra,
+    })
+  }
+
+  const handleSend = () => {
+    const text = composerDraft.trim()
+    if (!text) return
+
+    if (text.startsWith('/mention-list')) {
+      const serverChannels = guildChannels
+        .filter(c => storage.blockedChannels[c.id])
+        .map(c => c.name)
+      const serverUsers = guildUsers
+        .filter(u => storage.blockedUsers[u.id])
+        .map(u => u.displayName)
+
+      pushEphemeral(
+        `Blocked Mentions in ${activeGuild.name}`,
+        {
+          ephemeralChannels: serverChannels,
+          ephemeralUsers: serverUsers,
+        },
+      )
+      onComposerDraftChange('')
+      return
+    }
+
+    const addMatch = text.match(/^\/mention-add\s+(user|channel)\s+(.+)$/i)
+    if (addMatch) {
+      const sub = addMatch[1].toLowerCase()
+      const targetRaw = addMatch[2]
+      if (sub === 'user') {
+        const user = resolveUserTarget(targetRaw)
+        if (!user) {
+          pushEphemeral('Could not resolve user mention. Try @Maya, @Kaito, or @Sora.')
+        } else {
+          onSetUserBlocked(user.id, true)
+          pushEphemeral(
+            `Blocked @${user.username} from mention autocomplete (intercepted mention accepted).`,
+          )
+        }
+      } else {
+        const ch = resolveChannelTarget(targetRaw)
+        if (!ch) {
+          pushEphemeral('Could not resolve channel mention. Try #general or #dev-chat.')
+        } else {
+          onSetChannelBlocked(ch.id, true)
+          pushEphemeral(
+            `Blocked #${ch.name} from mention autocomplete (intercepted mention accepted).`,
+          )
+        }
+      }
+      onComposerDraftChange('')
+      return
+    }
+
+    const remMatch = text.match(/^\/mention-remove\s+(user|channel)\s+(.+)$/i)
+    if (remMatch) {
+      const sub = remMatch[1].toLowerCase()
+      const targetRaw = remMatch[2]
+      if (sub === 'user') {
+        const user = resolveUserTarget(targetRaw)
+        if (!user) {
+          pushEphemeral('Could not resolve blocked user.')
+        } else {
+          onSetUserBlocked(user.id, false)
+          pushEphemeral(`Restored @${user.username} to mention autocomplete.`)
+        }
+      } else {
+        const ch = resolveChannelTarget(targetRaw)
+        if (!ch) {
+          pushEphemeral('Could not resolve blocked channel.')
+        } else {
+          onSetChannelBlocked(ch.id, false)
+          pushEphemeral(`Restored #${ch.name} to mention autocomplete.`)
+        }
+      }
+      onComposerDraftChange('')
+      return
+    }
+
+    onAppendMessage({
+      id: `msg-${Date.now()}`,
+      channelId: activeChannel.id,
+      authorId: 'you',
+      timestamp: '22:55',
+      content: text,
+    })
+    onComposerDraftChange('')
+  }
+
+  // Close sheets on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSheet(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="flex flex-col items-center">
       {/* Mobile Device Bezel */}
-      <div className="relative flex h-[740px] w-full max-w-[404px] flex-col overflow-hidden rounded-[34px] border border-white/[0.12] bg-[#1C1D22] shadow-2xl">
+      <div className="relative flex h-[760px] w-full max-w-[404px] flex-col overflow-hidden rounded-[34px] border border-white/[0.12] bg-[#1C1D22] shadow-2xl">
         {/* Android Status Strip */}
         <div className="flex items-center justify-between bg-[#141519] px-6 pt-3 pb-2 text-[11px] font-medium text-slate-300 tabular-nums">
-          <span>22:27</span>
+          <span>22:54</span>
           <div className="flex items-center gap-2 text-slate-400">
             <span>Valenced</span>
             <span aria-hidden="true">·</span>
@@ -105,28 +311,31 @@ export function DiscordSimulator({
           </div>
         </div>
 
-        {/* Discord Channel Header & Channel Switcher */}
+        {/* Server + Channel Top Bar */}
         <div className="border-b border-white/[0.06] bg-[#1C1D22] px-4 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {activeChannel.nsfw ? (
-                <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
-              ) : (
-                <Hash className="h-4 w-4 text-slate-400 shrink-0" />
-              )}
-              <span className="truncate font-display text-sm font-semibold text-white">
-                {activeChannel.name}
-              </span>
-              {activeChannel.nsfw && (
-                <span className="ml-1 text-[11px] font-medium text-amber-400">
-                  NSFW
-                </span>
-              )}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              {guilds.map(g => {
+                const active = g.id === activeGuild.id
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => onSelectGuild(g.id)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium whitespace-nowrap transition-colors ${
+                      active
+                        ? 'bg-[#5865F2] text-white'
+                        : 'bg-[#111216] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {g.shortName}
+                  </button>
+                )
+              })}
             </div>
 
-            {/* Channel switcher buttons */}
-            <div className="flex items-center gap-1 rounded-lg bg-[#111216] p-0.5">
-              {channels.map(ch => {
+            <div className="flex items-center gap-1">
+              {guildChannels.map(ch => {
                 const active = ch.id === activeChannel.id
                 return (
                   <button
@@ -139,35 +348,101 @@ export function DiscordSimulator({
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    #{ch.nsfw ? 'nsfw' : 'general'}
+                    #{ch.name}
                   </button>
                 )
               })}
             </div>
           </div>
-          <p className="mt-1 truncate text-[11px] text-slate-400">
-            {activeChannel.topic}
-          </p>
+
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setSheet({ kind: 'channel', channel: activeChannel })}
+              className="flex items-center gap-1.5 min-w-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-white/[0.05]"
+              title="Open Channel Context Menu"
+            >
+              <Hash className="h-4 w-4 text-slate-400 shrink-0" />
+              <span className="truncate font-display text-sm font-semibold text-white">
+                {activeChannel.name}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSheet({ kind: 'channel', channel: activeChannel })}
+              aria-label="Open channel context menu"
+              className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-[#252730] px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white whitespace-nowrap shrink-0"
+            >
+              <SlidersHorizontal className="h-3 w-3" />
+              <span>Channel Menu</span>
+            </button>
+          </div>
         </div>
 
-        {/* Toast Overlay */}
+        {/* Toast Notification */}
         {toastText && (
-          <div className="pointer-events-none absolute top-24 left-1/2 z-30 -translate-x-1/2 rounded-lg border border-white/10 bg-[#111216]/95 px-3.5 py-2 text-xs font-medium text-slate-100 shadow-lg whitespace-nowrap">
+          <div className="pointer-events-none absolute top-28 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-white/10 bg-[#111216]/95 px-3.5 py-2 text-xs font-medium text-slate-100 shadow-lg whitespace-nowrap">
             {toastText}
           </div>
         )}
 
-        {/* Chat Message Stream */}
-        <div className="flex-1 space-y-1 overflow-y-auto bg-[#1C1D22] px-3 py-3">
+        {/* Chat Stream */}
+        <div className="flex-1 space-y-2 overflow-y-auto bg-[#1C1D22] px-3 py-3">
           {channelMessages.map(msg => {
-            const author = users[msg.authorId]
-            if (!author) return null
+            if (msg.isEphemeral) {
+              return (
+                <div
+                  key={msg.id}
+                  className="rounded-lg border border-[#5865F2]/30 bg-[#5865F2]/[0.08] px-3 py-2.5"
+                >
+                  <div className="mb-1 flex items-center justify-between text-[11px] text-[#99AAB5]">
+                    <span className="font-semibold text-[#A3B0FF]">
+                      Clyde · Ephemeral
+                    </span>
+                    <span>Only you can see this</span>
+                  </div>
+                  <div className="text-xs font-medium text-slate-100">
+                    {msg.content}
+                  </div>
+                  {(msg.ephemeralChannels || msg.ephemeralUsers) && (
+                    <div className="mt-2 space-y-1.5 text-xs text-slate-300">
+                      <div>
+                        <span className="font-semibold text-slate-200">
+                          Blocked Channels:{' '}
+                        </span>
+                        {msg.ephemeralChannels && msg.ephemeralChannels.length > 0
+                          ? msg.ephemeralChannels.map(c => `#${c}`).join(', ')
+                          : 'None'}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-200">
+                          Blocked Users:{' '}
+                        </span>
+                        {msg.ephemeralUsers && msg.ephemeralUsers.length > 0
+                          ? msg.ephemeralUsers.map(u => `@${u}`).join(', ')
+                          : 'None'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            }
 
-            const isUserHidden = Boolean(settings.hiddenUsers[author.id])
-            const hidingApplies =
-              isUserHidden && (!settings.nsfwOnly || activeChannel.nsfw)
-            const blockRevealed = Boolean(revealedBlocks[msg.id])
-            const imageDisplayed = Boolean(displayedImages[msg.id])
+            const author =
+              users[msg.authorId] ??
+              (msg.authorId === 'you'
+                ? {
+                    id: 'you',
+                    username: 'horndogcop',
+                    displayName: 'You',
+                    roleColor: '#F8FAFC',
+                    avatar: '/src/assets/images/avatar_user_kaito_1795329072613.jpg',
+                    bio: 'Valenced Plugin Author',
+                    guildIds: ['g-1', 'g-2'],
+                  }
+                : undefined)
+            if (!author) return null
 
             return (
               <div
@@ -175,12 +450,11 @@ export function DiscordSimulator({
                 className="group rounded-lg px-2 py-2 transition-colors hover:bg-white/[0.02]"
               >
                 <div className="flex items-start gap-3">
-                  {/* User Avatar (opens User ActionSheet) */}
                   <button
                     type="button"
-                    onClick={() => setSheetUserId(author.id)}
-                    title={`Open context menu for ${author.displayName}`}
-                    className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full ring-1 ring-white/10 transition-transform active:scale-95"
+                    onClick={() => setSheet({ kind: 'profile', user: author })}
+                    title={`Open User Profile for ${author.displayName}`}
+                    className="mt-0.5 h-9 w-9 shrink-0 overflow-hidden rounded-full ring-1 ring-white/10"
                   >
                     <img
                       src={author.avatar}
@@ -191,229 +465,34 @@ export function DiscordSimulator({
                   </button>
 
                   <div className="min-w-0 flex-1">
-                    {/* Message Header: Author + Timestamp + Silent Bell / Hidden Media Indicator */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => setSheetUserId(author.id)}
+                          onClick={() => setSheet({ kind: 'profile', user: author })}
                           className="truncate text-[13.5px] font-semibold hover:underline"
                           style={{ color: author.roleColor }}
                         >
                           {author.displayName}
                         </button>
-
                         <span className="font-mono text-[11px] text-[#949BA4] tabular-nums shrink-0">
                           {msg.timestamp}
                         </span>
-
-                        {/* Native @silent bell indicator for visual comparison */}
-                        {msg.isSilent && (
-                          <span
-                            title="Silent message (@silent)"
-                            className="inline-flex items-center text-[#949BA4]"
-                          >
-                            <BellOff className="h-3.5 w-3.5" />
-                          </span>
-                        )}
-
-                        {/* Plugin Post-Timestamp Indicator (mirrors silent bell) */}
-                        {hidingApplies && (
-                          <button
-                            type="button"
-                            onClick={e => {
-                              e.stopPropagation()
-                              onToggleImageIndicator(msg.id)
-                            }}
-                            title={
-                              imageDisplayed
-                                ? 'Hide image (indicator toggle)'
-                                : 'Display image (indicator toggle)'
-                            }
-                            aria-label={
-                              imageDisplayed
-                                ? 'Hide hidden user image'
-                                : 'Display hidden user image'
-                            }
-                            className={`inline-flex items-center justify-center rounded p-0.5 transition-colors ${
-                              imageDisplayed
-                                ? 'text-slate-200 hover:bg-white/10'
-                                : 'text-[#949BA4] hover:bg-white/10 hover:text-slate-200'
-                            }`}
-                          >
-                            {imageDisplayed ? (
-                              <Eye className="h-3.5 w-3.5" />
-                            ) : (
-                              <EyeOff className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                        )}
                       </div>
 
-                      {/* Quick Context Menu Trigger */}
                       <button
                         type="button"
-                        onClick={() => setSheetUserId(author.id)}
-                        aria-label={`User actions for ${author.displayName}`}
-                        className="rounded p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+                        onClick={() => setSheet({ kind: 'message', message: msg })}
+                        aria-label="Open message context menu"
+                        className="rounded p-1 text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-white"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
                     </div>
 
-                    {/* Message Block Body (Text + Images) */}
-                    {hidingApplies && settings.hideText ? (
-                      !blockRevealed ? (
-                        /* Unified Spoiler Overlay across the entire message block background */
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => onRevealBlock(msg.id)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault()
-                              onRevealBlock(msg.id)
-                            }
-                          }}
-                          aria-label="Spoilered hidden user message block, tap to reveal"
-                          className="mt-1.5 cursor-pointer select-none rounded-lg border border-white/[0.06] bg-[#2B2D31] p-3 transition-colors hover:bg-[#313339]"
-                        >
-                          <div
-                            aria-hidden="true"
-                            className="pointer-events-none select-none opacity-0"
-                          >
-                            <p className="text-[13.5px] leading-5">
-                              {msg.segments.map(s => s.value).join('')}
-                            </p>
-                            {msg.image && (
-                              <div className="mt-2 h-36 w-full rounded-lg" />
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        /* Revealed message block: whitespace click restores spoiler overlay;
-                           inline spoilers & image taps stopPropagation so they stay interactive */
-                        <div
-                          onClick={() => onCollapseBlock(msg.id)}
-                          className="mt-1.5 cursor-pointer rounded-lg border border-white/[0.05] bg-white/[0.02] p-2 transition-colors"
-                          title="Tap whitespace to restore spoiler overlay"
-                        >
-                          <div className="text-[13.5px] leading-[21px] text-[#DBDEE1]">
-                            {msg.segments.map((seg, idx) => {
-                              if (seg.type === 'text') {
-                                return <span key={idx}>{seg.value}</span>
-                              }
-                              const spoilerKey = `${msg.id}-sp-${idx}`
-                              const spoilerOpen = Boolean(
-                                revealedInlineSpoilers[spoilerKey],
-                              )
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={e => {
-                                    e.stopPropagation()
-                                    onToggleInlineSpoiler(spoilerKey)
-                                  }}
-                                  className={`mx-0.5 inline rounded px-1.5 py-0.5 text-[13px] transition-colors ${
-                                    spoilerOpen
-                                      ? 'bg-[#383A40] text-[#DBDEE1]'
-                                      : 'bg-[#111214] text-transparent hover:bg-[#191B1F]'
-                                  }`}
-                                >
-                                  {seg.value}
-                                </button>
-                              )
-                            })}
-                          </div>
-
-                          {msg.image && (
-                              <div className="mt-2">
-                                <button
-                                  type="button"
-                                  onClick={e => {
-                                    e.stopPropagation()
-                                    setLightboxImage(msg.image!)
-                                  }}
-                                  className="relative block w-full overflow-hidden rounded-lg border border-white/[0.06] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5865F2]"
-                                >
-                                  <img
-                                    src={msg.image.url}
-                                    alt={msg.image.alt}
-                                    referrerPolicy="no-referrer"
-                                    className={`h-36 w-full object-cover transition-[filter,transform] duration-200 ${
-                                      !imageDisplayed && settings.imageMode === 'blurred'
-                                        ? 'scale-105 blur-xl'
-                                        : 'blur-0'
-                                    }`}
-                                  />
-                                </button>
-                              </div>
-                            )}
-                        </div>
-                      )
-                    ) : (
-                      /* Standard or Images-Only Hidden/Blurred Rendering */
-                      <div className="mt-0.5">
-                        <div className="text-[13.5px] leading-[21px] text-[#DBDEE1]">
-                          {msg.segments.map((seg, idx) => {
-                            if (seg.type === 'text') {
-                              return <span key={idx}>{seg.value}</span>
-                            }
-                            const spoilerKey = `${msg.id}-sp-${idx}`
-                            const spoilerOpen = Boolean(
-                              revealedInlineSpoilers[spoilerKey],
-                            )
-                            return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => onToggleInlineSpoiler(spoilerKey)}
-                                className={`mx-0.5 inline rounded px-1.5 py-0.5 text-[13px] transition-colors ${
-                                  spoilerOpen
-                                    ? 'bg-[#383A40] text-[#DBDEE1]'
-                                    : 'bg-[#111214] text-transparent hover:bg-[#191B1F]'
-                                }`}
-                              >
-                                {seg.value}
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {msg.image &&
-                          (!hidingApplies ||
-                            imageDisplayed ||
-                            settings.imageMode === 'blurred') && (
-                            <div className="mt-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!hidingApplies || imageDisplayed) {
-                                    setLightboxImage(msg.image!)
-                                  } else {
-                                    onToggleImageIndicator(msg.id)
-                                  }
-                                }}
-                                className="relative block w-full overflow-hidden rounded-lg border border-white/[0.06] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5865F2]"
-                              >
-                                <img
-                                  src={msg.image.url}
-                                  alt={msg.image.alt}
-                                  referrerPolicy="no-referrer"
-                                  className={`h-40 w-full object-cover transition-[filter,transform] duration-200 ${
-                                    hidingApplies &&
-                                    !imageDisplayed &&
-                                    settings.imageMode === 'blurred'
-                                      ? 'scale-105 blur-xl'
-                                      : 'blur-0'
-                                  }`}
-                                />
-                              </button>
-                            </div>
-                          )}
-                      </div>
-                    )}
+                    <p className="mt-0.5 text-[13.5px] leading-[20px] text-[#DBDEE1]">
+                      {msg.content}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -421,23 +500,184 @@ export function DiscordSimulator({
           })}
         </div>
 
-        {/* Simulated Discord Mobile Message Composer Bar */}
-        <div className="border-t border-white/[0.06] bg-[#1C1D22] px-3.5 py-3">
-          <div className="flex items-center justify-between rounded-full bg-[#2B2D31] px-4 py-2 text-xs text-slate-400">
-            <span>Message #{activeChannel.name}</span>
-            <span className="font-mono text-[11px] text-slate-500">
-              {settings.nsfwOnly && !activeChannel.nsfw
-                ? 'NSFW-only idle'
-                : 'Filter active'}
-            </span>
+        {/* Autocomplete Popup Tray (Slash commands, Subcommands, @user, #channel) */}
+        {(matchingSlashCommands.length > 0 ||
+          matchingSubcommands.length > 0 ||
+          mentionKind === '@' ||
+          mentionKind === '#') && (
+          <div className="max-h-48 overflow-y-auto border-t border-white/[0.08] bg-[#16181F] px-3 py-2">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+              <span>
+                {slashQueryMatch
+                  ? 'Built-in Commands'
+                  : subcommandMatch
+                    ? 'Subcommands'
+                    : mentionKind === '@'
+                      ? 'Mention User Suggestions'
+                      : 'Mention Channel Suggestions'}
+              </span>
+              <span className="font-mono text-[10px] text-slate-400">
+                {bypassInterception
+                  ? 'Interception bypassed'
+                  : isAddCommand
+                    ? 'Command mentions allowed'
+                    : 'Interception active'}
+              </span>
+            </div>
+
+            {matchingSlashCommands.map(cmd => (
+              <button
+                key={cmd.name}
+                type="button"
+                onClick={() => applySuggestion(cmd.name)}
+                className="flex w-full items-start justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-white/[0.06]"
+              >
+                <div>
+                  <div className="font-mono text-xs font-semibold text-white">
+                    /{cmd.name}
+                  </div>
+                  <div className="text-[11px] text-slate-400">{cmd.desc}</div>
+                </div>
+              </button>
+            ))}
+
+            {matchingSubcommands.map(sub => (
+              <button
+                key={sub}
+                type="button"
+                onClick={() => applySuggestion(sub)}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-medium text-white transition-colors hover:bg-white/[0.06]"
+              >
+                <span className="font-mono">{sub}</span>
+                <span className="text-[11px] text-slate-400">
+                  {sub === 'user' ? '@user target' : '#channel target'}
+                </span>
+              </button>
+            ))}
+
+            {mentionKind === '@' &&
+              (userSuggestions.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-slate-500">
+                  No unblocked @user suggestions match.
+                </div>
+              ) : (
+                userSuggestions.map(u => {
+                  const isBlocked = Boolean(storage.blockedUsers[u.id])
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => applySuggestion(`@${u.username}`)}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.06]"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <img
+                          src={u.avatar}
+                          alt={u.displayName}
+                          referrerPolicy="no-referrer"
+                          className="h-6 w-6 rounded-full object-cover"
+                        />
+                        <span className="truncate text-xs font-medium text-white">
+                          {u.displayName}
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          @{u.username}
+                        </span>
+                      </div>
+                      {isBlocked && (
+                        <span className="text-[10px] font-medium text-amber-400">
+                          Blocked
+                        </span>
+                      )}
+                    </button>
+                  )
+                })
+              ))}
+
+            {mentionKind === '#' &&
+              (channelSuggestions.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-slate-500">
+                  No unblocked #channel suggestions match.
+                </div>
+              ) : (
+                channelSuggestions.map(ch => {
+                  const isBlocked = Boolean(storage.blockedChannels[ch.id])
+                  return (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => applySuggestion(`#${ch.name}`)}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.06]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Hash className="h-3.5 w-3.5 text-slate-400" />
+                        <span className="text-xs font-medium text-white">
+                          {ch.name}
+                        </span>
+                      </div>
+                      {isBlocked && (
+                        <span className="text-[10px] font-medium text-amber-400">
+                          Blocked
+                        </span>
+                      )}
+                    </button>
+                  )
+                })
+              ))}
+          </div>
+        )}
+
+        {/* Composer Input + Trigger Shortcuts */}
+        <div className="border-t border-white/[0.06] bg-[#1C1D22] px-3 pt-2 pb-3">
+          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto">
+            {[
+              { label: '@mention', value: '@' },
+              { label: '#channel', value: '#' },
+              { label: '/mention-add', value: '/mention-add ' },
+              { label: '/mention-remove', value: '/mention-remove ' },
+              { label: '/mention-list', value: '/mention-list' },
+            ].map(chip => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => onComposerDraftChange(chip.value)}
+                className="rounded-md border border-white/[0.08] bg-[#252730] px-2 py-1 font-mono text-[11px] text-slate-300 transition-colors hover:border-white/20 hover:text-white whitespace-nowrap shrink-0"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={composerDraft}
+              onChange={e => onComposerDraftChange(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              placeholder="Type @, #, or /mention-..."
+              className="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-[#2B2D31] px-4 py-2 text-xs text-white placeholder:text-slate-400 focus:border-[#5865F2] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              aria-label="Send message or run command"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5865F2] text-white transition-colors hover:bg-[#4752C4]"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
 
-        {/* User ActionSheet / Context Menu Overlay */}
-        {sheetUser && (
+        {/* Message / Channel ActionSheet & User Profile Modal */}
+        {sheet && (
           <div
-            onClick={() => setSheetUserId(null)}
-            className="absolute inset-0 z-40 flex flex-col justify-end bg-black/60 backdrop-blur-[1px]"
+            onClick={() => setSheet(null)}
+            className="absolute inset-0 z-50 flex flex-col justify-end bg-black/65 backdrop-blur-[1px]"
           >
             <div
               onClick={e => e.stopPropagation()}
@@ -445,98 +685,220 @@ export function DiscordSimulator({
             >
               <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-white/20" />
 
-              <div className="mb-4 flex items-center gap-3 px-1">
-                <img
-                  src={sheetUser.avatar}
-                  alt={sheetUser.displayName}
-                  referrerPolicy="no-referrer"
-                  className="h-11 w-11 rounded-full object-cover"
-                />
-                <div>
-                  <div className="font-display text-sm font-semibold text-white">
-                    {sheetUser.displayName}
-                  </div>
-                  <div className="font-mono text-xs text-slate-400">
-                    @{sheetUser.username}
-                  </div>
-                </div>
-              </div>
+              {sheet.kind === 'message' && (() => {
+                const msgAuthor = users[sheet.message.authorId]
+                const msgChannel =
+                  channels.find(c => c.id === sheet.message.channelId) ??
+                  activeChannel
+                const userBlocked = msgAuthor
+                  ? Boolean(storage.blockedUsers[msgAuthor.id])
+                  : false
+                const chanBlocked = Boolean(
+                  storage.blockedChannels[msgChannel.id],
+                )
 
-              <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/[0.06] bg-[#262830]">
-                <button
-                  type="button"
-                  onClick={() => setSheetUserId(null)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.04]"
-                >
-                  <User className="h-4 w-4 text-slate-400" />
-                  <span>View Profile</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetUserId(null)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/[0.04]"
-                >
-                  <AtSign className="h-4 w-4 text-slate-400" />
-                  <span>Mention</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleActionSheetToggle(sheetUser.id)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-white transition-colors hover:bg-white/[0.06]"
-                >
-                  <span className="flex items-center gap-3">
-                    {sheetUserHidden ? (
-                      <Eye className="h-4 w-4 text-[#7984F6]" />
-                    ) : (
-                      <EyeOff className="h-4 w-4 text-[#7984F6]" />
-                    )}
-                    <span>
-                      {sheetUserHidden
-                        ? 'Unhide User Content'
-                        : 'Hide User Content'}
-                    </span>
-                  </span>
-                  <span className="text-xs text-slate-400">Valenced</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                return (
+                  <div>
+                    <div className="mb-3 flex items-center justify-between px-1">
+                      <div className="text-xs font-medium text-slate-400">
+                        Message Context Menu · 2 plugin entries
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSheet(null)}
+                        className="rounded p-1 text-slate-400 hover:text-white"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
 
-        {/* Full-Screen Media Viewer Lightbox (Image tap inside revealed block) */}
-        {lightboxImage && (
-          <div
-            onClick={() => setLightboxImage(null)}
-            className="absolute inset-0 z-50 flex flex-col bg-black/95"
-          >
-            <div className="flex items-center justify-between px-4 pt-4 pb-2">
-              <div className="min-w-0">
-                <div className="truncate font-mono text-xs text-slate-200">
-                  {lightboxImage.filename}
-                </div>
-                <div className="font-mono text-[11px] text-slate-400 tabular-nums">
-                  {lightboxImage.dimensions}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setLightboxImage(null)}
-                aria-label="Close image viewer"
-                className="rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div
-              onClick={e => e.stopPropagation()}
-              className="flex flex-1 items-center justify-center p-4"
-            >
-              <img
-                src={lightboxImage.url}
-                alt={lightboxImage.alt}
-                referrerPolicy="no-referrer"
-                className="max-h-full max-w-full rounded-lg object-contain"
-              />
+                    <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/[0.06] bg-[#262830]">
+                      {msgAuthor && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nowBlocked = onToggleUserBlocked(msgAuthor.id)
+                            setSheet(null)
+                            showToast(
+                              nowBlocked
+                                ? `Blocked @${msgAuthor.username} from mentions`
+                                : `Restored @${msgAuthor.username} to mentions`,
+                            )
+                          }}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-white transition-colors hover:bg-white/[0.05]"
+                        >
+                          <span className="flex items-center gap-3">
+                            {userBlocked ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                            ) : (
+                              <Ban className="h-4 w-4 text-[#7984F6]" />
+                            )}
+                            <span>
+                              {userBlocked
+                                ? `Unblock @${msgAuthor.username} from Mentions`
+                                : `Block @${msgAuthor.username} from Mentions`}
+                            </span>
+                          </span>
+                          <User className="h-3.5 w-3.5 text-slate-400" />
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nowBlocked = onToggleChannelBlocked(msgChannel.id)
+                          setSheet(null)
+                          showToast(
+                            nowBlocked
+                              ? `Blocked #${msgChannel.name} from mentions`
+                              : `Restored #${msgChannel.name} to mentions`,
+                          )
+                        }}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-white transition-colors hover:bg-white/[0.05]"
+                      >
+                        <span className="flex items-center gap-3">
+                          {chanBlocked ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                          ) : (
+                            <Ban className="h-4 w-4 text-[#7984F6]" />
+                          )}
+                          <span>
+                            {chanBlocked
+                              ? `Unblock #${msgChannel.name} from Mentions`
+                              : `Block #${msgChannel.name} from Mentions`}
+                          </span>
+                        </span>
+                        <Hash className="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {sheet.kind === 'channel' && (() => {
+                const chanBlocked = Boolean(
+                  storage.blockedChannels[sheet.channel.id],
+                )
+                return (
+                  <div>
+                    <div className="mb-3 flex items-center justify-between px-1">
+                      <div className="flex items-center gap-2">
+                        <Hash className="h-4 w-4 text-slate-400" />
+                        <span className="font-display text-sm font-semibold text-white">
+                          {sheet.channel.name}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSheet(null)}
+                        className="rounded p-1 text-slate-400 hover:text-white"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-[#262830]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nowBlocked = onToggleChannelBlocked(
+                            sheet.channel.id,
+                          )
+                          setSheet(null)
+                          showToast(
+                            nowBlocked
+                              ? `Blocked #${sheet.channel.name} from mentions`
+                              : `Restored #${sheet.channel.name} to mentions`,
+                          )
+                        }}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-white transition-colors hover:bg-white/[0.05]"
+                      >
+                        <span className="flex items-center gap-3">
+                          {chanBlocked ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                          ) : (
+                            <Ban className="h-4 w-4 text-[#7984F6]" />
+                          )}
+                          <span>
+                            {chanBlocked
+                              ? 'Unblock Channel from Mentions'
+                              : 'Block Channel from Mentions'}
+                          </span>
+                        </span>
+                        <span className="text-xs text-slate-400">Valenced</span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {sheet.kind === 'profile' && (() => {
+                const userBlocked = Boolean(
+                  storage.blockedUsers[sheet.user.id],
+                )
+                return (
+                  <div>
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={sheet.user.avatar}
+                          alt={sheet.user.displayName}
+                          referrerPolicy="no-referrer"
+                          className="h-14 w-14 rounded-full object-cover ring-2 ring-white/10"
+                        />
+                        <div>
+                          <div className="font-display text-base font-semibold text-white">
+                            {sheet.user.displayName}
+                          </div>
+                          <div className="font-mono text-xs text-slate-400">
+                            @{sheet.user.username}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-300">
+                            {sheet.user.bio}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSheet(null)}
+                        className="rounded p-1 text-slate-400 hover:text-white"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/[0.06] bg-[#262830]">
+                      <div className="flex items-center gap-3 px-4 py-2.5 text-xs text-slate-400">
+                        <ShieldCheck className="h-4 w-4 text-slate-500" />
+                        <span>User Profile Actions</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nowBlocked = onToggleUserBlocked(sheet.user.id)
+                          setSheet(null)
+                          showToast(
+                            nowBlocked
+                              ? `Blocked @${sheet.user.username} from mentions`
+                              : `Restored @${sheet.user.username} to mentions`,
+                          )
+                        }}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-white transition-colors hover:bg-white/[0.05]"
+                      >
+                        <span className="flex items-center gap-3">
+                          <AtSign className="h-4 w-4 text-[#7984F6]" />
+                          <span>
+                            {userBlocked
+                              ? 'Unblock User from Mentions'
+                              : 'Block User from Mentions'}
+                          </span>
+                        </span>
+                        <span className="text-xs text-slate-400">Valenced</span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         )}
