@@ -1,11 +1,13 @@
 {
-  "name": "@valenced/hide-user-content-repo",
+  "name": "@horndogcop/valenced-plugins",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "valenced-plugin build",
     "build:dev": "valenced-plugin build --dev",
+    "package": "bun scripts/package-plugins.ts",
     "generate-index": "valenced-plugin generate-index",
+    "plan-releases": "valenced-plugin plan-releases",
     "serve": "valenced-plugin serve",
     "lint:types": "tsc -b plugins/*/tsconfig.json"
   },
@@ -18,5 +20,9 @@
     "@types/react": "^19.0.0",
     "react-native": "0.81.6",
     "typescript": "^7.0.2"
-  }
+  },
+  "trustedDependencies": [
+    "@valenced/plugin-cli",
+    "@swc/core"
+  ]
 }

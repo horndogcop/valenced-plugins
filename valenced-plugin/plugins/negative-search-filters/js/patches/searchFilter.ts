@@ -2,7 +2,7 @@ import { Dispatcher } from '@valenced/discord/common/flux'
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after, before } from '@valenced/patcher'
+import { before, instead } from '@valenced/patcher'
 import { matchesParsedSearchQuery, parseSearchQuery } from '../parser'
 import type { ParsedSearchQuery, SearchMessageLike } from '../types'
 
@@ -94,7 +94,9 @@ export function patchSearchFilter(): () => void {
       withProps<{ tokenize: (query: string) => any[] }>('tokenize'),
       mod => {
         unpatches.push(
-          after(mod, 'tokenize', ([query], tokens) => {
+          instead(mod, 'tokenize', (args, orig) => {
+            const [query] = args
+            const tokens = orig(...args)
             if (typeof query !== 'string' || !Array.isArray(tokens)) return tokens
             setActiveRawSearchQuery(query)
             const parsed = parseSearchQuery(query)
@@ -140,6 +142,7 @@ export function patchSearchFilter(): () => void {
                 args[1] = { ...query, content: parsed.serverQuery }
               }
             }
+            return args
           }),
         )
       },
@@ -150,13 +153,19 @@ export function patchSearchFilter(): () => void {
   // 3. Patch RestAPI.get for `/messages/search` requests so negative filters never hit the API
   unpatches.push(
     getModules(
-      withProps<{ get: (req: any) => Promise<any> }>('get', 'post', 'put'),
+      withProps<{
+        get: (req: any) => Promise<any>
+        post: (...args: any[]) => any
+        put: (...args: any[]) => any
+      }>('get', 'post', 'put'),
       restApi => {
         unpatches.push(
-          before(restApi, 'get', ([req]) => {
+          before(restApi, 'get', args => {
+            const [req] = args
             if (req && typeof req.url === 'string' && req.url.includes('/messages/search')) {
               req.url = stripNegativeTokensFromRestQuery(req.url)
             }
+            return args
           }),
         )
       },
@@ -166,12 +175,13 @@ export function patchSearchFilter(): () => void {
 
   // 4. Patch SearchStore results & SEARCH_FINISH payload client-side
   unpatches.push(
-    before(Dispatcher as any, 'dispatch', ([payload]) => {
-      if (!payload || typeof payload !== 'object') return
-      if (payload.type !== 'SEARCH_FINISH') return
+    before(Dispatcher as any, 'dispatch', args => {
+      const [payload] = args
+      if (!payload || typeof payload !== 'object') return args
+      if (payload.type !== 'SEARCH_FINISH') return args
 
       const parsed = getActiveParsedQuery(String(payload.id ?? 'default'))
-      if (parsed.negativeFilters.length === 0) return
+      if (parsed.negativeFilters.length === 0) return args
 
       const { filtered, removedCount } = filterSearchMessages(
         payload.messages,
@@ -181,6 +191,7 @@ export function patchSearchFilter(): () => void {
       if (typeof payload.totalResults === 'number') {
         payload.totalResults = Math.max(0, payload.totalResults - removedCount)
       }
+      return args
     }),
   )
 
@@ -189,7 +200,9 @@ export function patchSearchFilter(): () => void {
       withProps<{ getSearchResults: (id: string) => any }>('getSearchResults'),
       searchStore => {
         unpatches.push(
-          after(searchStore, 'getSearchResults', ([searchId], res) => {
+          instead(searchStore, 'getSearchResults', (args, orig) => {
+            const [searchId] = args
+            const res = orig(...args)
             if (!res || typeof res !== 'object') return res
             const parsed = getActiveParsedQuery(String(searchId ?? 'default'))
             if (parsed.negativeFilters.length === 0) return res

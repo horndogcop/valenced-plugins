@@ -1,0 +1,54 @@
+name: Validate Plugins
+
+on:
+  pull_request:
+    paths:
+      - 'valenced-plugin/**'
+      - 'plugins/**'
+      - 'scripts/**'
+      - 'repo.config.json'
+      - '.github/workflows/validate-plugins.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Detect plugin workspace root
+        id: paths
+        run: |
+          if [ -d "valenced-plugin/plugins" ]; then
+            echo "root=valenced-plugin" >> "$GITHUB_OUTPUT"
+          else
+            echo "root=." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install plugin dependencies
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun install
+
+      - name: Typecheck all plugins
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun lint:types
+
+      - name: Build plugin JS bundles
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun build
+
+      - name: Package plugin ZIP archives
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun package
+
+      - name: Validate repository index generation
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: |
+          bun run --bun generate-index \
+            --dist build/dist \
+            --base-url https://valenced.local/pool \
+            --out /tmp/index.json
+          cat /tmp/index.json

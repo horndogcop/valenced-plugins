@@ -1,7 +1,7 @@
 import { Design } from '@valenced/discord/design'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after } from '@valenced/patcher'
+import { instead } from '@valenced/patcher'
 import { insteadJSX } from '@valenced/react/jsx-runtime'
 import { useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
@@ -135,7 +135,9 @@ export function patchSearchMenu(): () => void {
       }>('getSearchFilterSuggestions'),
       mod => {
         unpatches.push(
-          after(mod, 'getSearchFilterSuggestions', ([query], suggestions) => {
+          instead(mod, 'getSearchFilterSuggestions', (args, orig) => {
+            const [query] = args
+            const suggestions = orig(...args)
             if (typeof query !== 'string') return suggestions
             const lastToken = query.split(/\s+/).pop() ?? ''
             if (!lastToken.startsWith('-')) return suggestions

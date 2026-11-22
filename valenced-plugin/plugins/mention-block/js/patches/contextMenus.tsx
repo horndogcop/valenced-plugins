@@ -5,7 +5,7 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { before } from '@valenced/patcher'
-import { afterJSX, insteadJSX } from '@valenced/react/jsx-runtime'
+import { beforeJSX, insteadJSX } from '@valenced/react/jsx-runtime'
 import { findInTree } from '@valenced/utils/tree'
 import { createElement } from 'react'
 import {
@@ -23,11 +23,11 @@ function findMessageInProps(source: unknown): DiscordMessage | undefined {
   if (rec.message && typeof rec.message.id === 'string') {
     return rec.message as DiscordMessage
   }
-  return findInTree(
+  return (findInTree(
     rec,
-    node => Boolean(node && typeof node === 'object' && node.message?.id),
+    (node: any) => Boolean(node && typeof node === 'object' && node.message?.id),
     { maxDepth: 4 },
-  )?.message as DiscordMessage | undefined
+  ) as { message?: DiscordMessage } | undefined)?.message
 }
 
 function findChannelInProps(source: unknown): DiscordChannel | undefined {
@@ -40,11 +40,11 @@ function findChannelInProps(source: unknown): DiscordChannel | undefined {
     const channelStore = (Stores as Record<string, any>).ChannelStore
     return channelStore?.getChannel?.(rec.channelId) ?? { id: rec.channelId }
   }
-  return findInTree(
+  return (findInTree(
     rec,
-    node => Boolean(node && typeof node === 'object' && node.channel?.id),
+    (node: any) => Boolean(node && typeof node === 'object' && node.channel?.id),
     { maxDepth: 4 },
-  )?.channel as DiscordChannel | undefined
+  ) as { channel?: DiscordChannel } | undefined)?.channel
 }
 
 function findUserInProps(source: unknown): DiscordUser | undefined {
@@ -57,11 +57,11 @@ function findUserInProps(source: unknown): DiscordUser | undefined {
     const userStore = (Stores as Record<string, any>).UserStore
     return userStore?.getUser?.(rec.userId) ?? { id: rec.userId }
   }
-  return findInTree(
+  return (findInTree(
     rec,
-    node => Boolean(node && typeof node === 'object' && node.user?.id),
+    (node: any) => Boolean(node && typeof node === 'object' && node.user?.id),
     { maxDepth: 4 },
-  )?.user as DiscordUser | undefined
+  ) as { user?: DiscordUser } | undefined)?.user
 }
 
 async function handleToggleUserMention(user: DiscordUser) {
@@ -72,7 +72,7 @@ async function handleToggleUserMention(user: DiscordUser) {
     text: blockedNow
       ? `Blocked @${label} from mention autocomplete`
       : `Restored @${label} to mention autocomplete`,
-    icon: getAssetIdByName(blockedNow ? 'CircleXIcon' : 'CheckmarkIcon'),
+    variant: 'default',
   })
 }
 
@@ -84,7 +84,7 @@ async function handleToggleChannelMention(channel: DiscordChannel) {
     text: blockedNow
       ? `Blocked ${label} from mention autocomplete`
       : `Restored ${label} to mention autocomplete`,
-    icon: getAssetIdByName(blockedNow ? 'CircleXIcon' : 'CheckmarkIcon'),
+    variant: 'default',
   })
 }
 
@@ -108,16 +108,16 @@ function createActionRow(
 function appendRowsToSheetTree(tree: ReactElement, rows: ReactElement[]): ReactElement {
   const groupNode = findInTree(
     tree as Record<string, any>,
-    node =>
+    (node: any) =>
       Boolean(
         node &&
           typeof node === 'object' &&
-          (node.type === Design.ActionSheetRowGroup ||
+          (node.type === Design.ActionSheetRow.Group ||
             node.type === Design.TableRowGroup) &&
           Array.isArray(node.props?.children),
       ),
     { maxDepth: 8 },
-  )
+  ) as { props?: { children?: any[] } } | undefined
 
   if (groupNode && Array.isArray(groupNode.props?.children)) {
     for (const row of rows) {
@@ -143,7 +143,7 @@ export function patchContextMenus(): () => void {
   unpatches.push(
     before(ActionSheetActionCreators, 'openLazy', args => {
       const [sheetPromise, key, props] = args
-      if (!sheetPromise) return
+      if (!sheetPromise) return args
 
       const message = findMessageInProps(props)
       const channel =
@@ -163,13 +163,13 @@ export function patchContextMenus(): () => void {
       const isUserProfileSheet =
         !isMessageSheet && !isChannelSheet && (/user|profile/i.test(sheetKey) || Boolean(user?.id))
 
-      if (!isMessageSheet && !isChannelSheet && !isUserProfileSheet) return
+      if (!isMessageSheet && !isChannelSheet && !isUserProfileSheet) return args
 
-      args[0] = sheetPromise.then(mod => {
+      const wrappedPromise = sheetPromise.then(mod => {
         if (!mod?.default || (mod.default as any).__valencedMentionBlockPatched) {
           return mod
         }
-        const OriginalSheet = mod.default
+        const OriginalSheet = mod.default as (sheetProps: any) => ReactElement
 
         const WrappedSheet = (sheetProps: any) => {
           const rendered = OriginalSheet(sheetProps)
@@ -249,8 +249,10 @@ export function patchContextMenus(): () => void {
         }
 
         ;(WrappedSheet as any).__valencedMentionBlockPatched = true
-        return { ...mod, default: WrappedSheet }
+        return { ...mod, default: WrappedSheet as any }
       })
+
+      return [wrappedPromise, key, props, args[3]]
     }),
   )
 
@@ -295,28 +297,24 @@ export function patchContextMenus(): () => void {
   // 3. Patch ContextMenu components for split/tablet layouts
   if (Design.ContextMenu) {
     unpatches.push(
-      afterJSX(Design.ContextMenu, ([, props], res) => {
-        if (!res || typeof res !== 'object') return res
-        const resProps = (res as ReactElement<any>).props
-        if (!Array.isArray(resProps?.children)) return res
+      beforeJSX(Design.ContextMenu, ([type, props, key]) => {
+        if (!Array.isArray(props?.items)) return [type, props, key]
 
         const msg = findMessageInProps(props)
         const channel = findChannelInProps(props)
         const user = msg?.author ?? findUserInProps(props)
+        const nextItems = [...props.items]
 
         if (user?.id) {
           const blocked = isUserBlocked(user.id)
-          const itemKey = `valenced-mb-ctx-user-${user.id}`
-          if (!resProps.children.some((c: any) => c?.key === itemKey)) {
-            resProps.children.push(
-              createElement(Design.ContextMenuItem, {
-                key: itemKey,
-                label: blocked
-                  ? 'Unblock User from Mentions'
-                  : 'Block User from Mentions',
-                action: () => void handleToggleUserMention(user),
-              } as any),
-            )
+          const label = blocked
+            ? 'Unblock User from Mentions'
+            : 'Block User from Mentions'
+          if (!nextItems.some(item => !Array.isArray(item) && item?.label === label)) {
+            nextItems.push({
+              label,
+              action: () => void handleToggleUserMention(user),
+            })
           }
         }
 
@@ -327,21 +325,18 @@ export function patchContextMenus(): () => void {
             : undefined)
         if (targetChannel?.id) {
           const blocked = isChannelBlocked(targetChannel.id)
-          const itemKey = `valenced-mb-ctx-chan-${targetChannel.id}`
-          if (!resProps.children.some((c: any) => c?.key === itemKey)) {
-            resProps.children.push(
-              createElement(Design.ContextMenuItem, {
-                key: itemKey,
-                label: blocked
-                  ? 'Unblock Channel from Mentions'
-                  : 'Block Channel from Mentions',
-                action: () => void handleToggleChannelMention(targetChannel),
-              } as any),
-            )
+          const label = blocked
+            ? 'Unblock Channel from Mentions'
+            : 'Block Channel from Mentions'
+          if (!nextItems.some(item => !Array.isArray(item) && item?.label === label)) {
+            nextItems.push({
+              label,
+              action: () => void handleToggleChannelMention(targetChannel),
+            })
           }
         }
 
-        return res
+        return [type, { ...props, items: nextItems }, key]
       }),
     )
   }

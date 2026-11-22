@@ -1,7 +1,7 @@
 import { Stores } from '@valenced/discord/flux'
 import { getModules, lookupModule } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after } from '@valenced/patcher'
+import { instead } from '@valenced/patcher'
 import {
   getCachedStorage,
   setChannelBlocked,
@@ -61,9 +61,11 @@ function getSubcommandAndTarget(args: CommandOptionArg[]): {
 }
 
 function sendEphemeralMessage(channelId: string, content: string): void {
-  const [messageActions] = lookupModule<{
-    sendBotMessage?: (channelId: string, content: string) => void
-  }>(withProps('sendBotMessage'))
+  const [messageActions] = lookupModule(
+    withProps<{
+      sendBotMessage: (channelId: string, content: string) => void
+    }>('sendBotMessage'),
+  )
 
   if (typeof messageActions?.sendBotMessage === 'function') {
     messageActions.sendBotMessage(channelId, content)
@@ -326,21 +328,22 @@ export function patchCommands(): () => void {
   unpatches.push(
     getModules(
       withProps<{
-        BUILT_IN_COMMANDS?: BuiltInCommand[]
-        getBuiltInCommands?: (type?: number) => BuiltInCommand[]
+        getBuiltInCommands: (type?: number) => BuiltInCommand[]
       }>('getBuiltInCommands'),
       mod => {
-        if (Array.isArray(mod.BUILT_IN_COMMANDS)) {
+        const builtInList = (mod as { BUILT_IN_COMMANDS?: BuiltInCommand[] })
+          .BUILT_IN_COMMANDS
+        if (Array.isArray(builtInList)) {
           for (const cmd of commands) {
-            if (!mod.BUILT_IN_COMMANDS.some(c => c.id === cmd.id)) {
-              mod.BUILT_IN_COMMANDS.push(cmd)
+            if (!builtInList.some(c => c.id === cmd.id)) {
+              builtInList.push(cmd)
             }
           }
           unpatches.push(() => {
-            if (!Array.isArray(mod.BUILT_IN_COMMANDS)) return
-            for (let i = mod.BUILT_IN_COMMANDS.length - 1; i >= 0; i--) {
-              if (commandIds.has(mod.BUILT_IN_COMMANDS[i]?.id)) {
-                mod.BUILT_IN_COMMANDS.splice(i, 1)
+            if (!Array.isArray(builtInList)) return
+            for (let i = builtInList.length - 1; i >= 0; i--) {
+              if (commandIds.has(builtInList[i]?.id)) {
+                builtInList.splice(i, 1)
               }
             }
           })
@@ -348,7 +351,9 @@ export function patchCommands(): () => void {
 
         if (typeof mod.getBuiltInCommands === 'function') {
           unpatches.push(
-            after(mod, 'getBuiltInCommands', ([type], res) => {
+            instead(mod, 'getBuiltInCommands', (args, orig) => {
+              const res = orig(...args)
+              const [type] = args
               if (type !== undefined && type !== ApplicationCommandType.CHAT) {
                 return res
               }

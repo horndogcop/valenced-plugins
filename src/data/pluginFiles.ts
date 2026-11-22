@@ -424,7 +424,7 @@ export function matchesParsedSearchQuery(
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after, before } from '@valenced/patcher'
+import { before, instead } from '@valenced/patcher'
 import { matchesParsedSearchQuery, parseSearchQuery } from '../parser'
 import type { ParsedSearchQuery, SearchMessageLike } from '../types'
 
@@ -508,7 +508,9 @@ export function patchSearchFilter(): () => void {
       withProps<{ tokenize: (query: string) => any[] }>('tokenize'),
       mod => {
         unpatches.push(
-          after(mod, 'tokenize', ([query], tokens) => {
+          instead(mod, 'tokenize', (args, orig) => {
+            const [query] = args
+            const tokens = orig(...args)
             if (typeof query !== 'string' || !Array.isArray(tokens)) return tokens
             setActiveRawSearchQuery(query)
             const parsed = parseSearchQuery(query)
@@ -557,6 +559,7 @@ export function patchSearchFilter(): () => void {
                 args[1] = { ...query, content: parsed.serverQuery }
               }
             }
+            return args
           }),
         )
       },
@@ -566,10 +569,15 @@ export function patchSearchFilter(): () => void {
 
   unpatches.push(
     getModules(
-      withProps<{ get: (req: any) => Promise<any> }>('get', 'post', 'put'),
+      withProps<{
+        get: (req: any) => Promise<any>
+        post: (...args: any[]) => any
+        put: (...args: any[]) => any
+      }>('get', 'post', 'put'),
       restApi => {
         unpatches.push(
-          before(restApi, 'get', ([req]) => {
+          before(restApi, 'get', args => {
+            const [req] = args
             if (
               req &&
               typeof req.url === 'string' &&
@@ -577,6 +585,7 @@ export function patchSearchFilter(): () => void {
             ) {
               req.url = stripNegativeTokensFromRestQuery(req.url)
             }
+            return args
           }),
         )
       },
@@ -585,12 +594,13 @@ export function patchSearchFilter(): () => void {
   )
 
   unpatches.push(
-    before(Dispatcher as any, 'dispatch', ([payload]) => {
-      if (!payload || typeof payload !== 'object') return
-      if (payload.type !== 'SEARCH_FINISH') return
+    before(Dispatcher as any, 'dispatch', args => {
+      const [payload] = args
+      if (!payload || typeof payload !== 'object') return args
+      if (payload.type !== 'SEARCH_FINISH') return args
 
       const parsed = getActiveParsedQuery(String(payload.id ?? 'default'))
-      if (parsed.negativeFilters.length === 0) return
+      if (parsed.negativeFilters.length === 0) return args
 
       const { filtered, removedCount } = filterSearchMessages(
         payload.messages,
@@ -600,6 +610,7 @@ export function patchSearchFilter(): () => void {
       if (typeof payload.totalResults === 'number') {
         payload.totalResults = Math.max(0, payload.totalResults - removedCount)
       }
+      return args
     }),
   )
 
@@ -608,7 +619,9 @@ export function patchSearchFilter(): () => void {
       withProps<{ getSearchResults: (id: string) => any }>('getSearchResults'),
       searchStore => {
         unpatches.push(
-          after(searchStore, 'getSearchResults', ([searchId], res) => {
+          instead(searchStore, 'getSearchResults', (args, orig) => {
+            const [searchId] = args
+            const res = orig(...args)
             if (!res || typeof res !== 'object') return res
             const parsed = getActiveParsedQuery(String(searchId ?? 'default'))
             if (parsed.negativeFilters.length === 0) return res
@@ -652,7 +665,7 @@ export function patchSearchFilter(): () => void {
     content: `import { Design } from '@valenced/discord/design'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after } from '@valenced/patcher'
+import { instead } from '@valenced/patcher'
 import { insteadJSX } from '@valenced/react/jsx-runtime'
 import { useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
@@ -784,7 +797,9 @@ export function patchSearchMenu(): () => void {
       }>('getSearchFilterSuggestions'),
       mod => {
         unpatches.push(
-          after(mod, 'getSearchFilterSuggestions', ([query], suggestions) => {
+          instead(mod, 'getSearchFilterSuggestions', (args, orig) => {
+            const [query] = args
+            const suggestions = orig(...args)
             if (typeof query !== 'string') return suggestions
             const lastToken = query.split(/\\s+/).pop() ?? ''
             if (!lastToken.startsWith('-')) return suggestions
@@ -859,13 +874,15 @@ export function patchSearchMenu(): () => void {
     language: 'json',
     summary: 'Template root package.json wired to @valenced/plugin-cli and @valenced/types.',
     content: `{
-  "name": "@valenced/negative-search-filters-repo",
+  "name": "@horndogcop/valenced-plugins",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "valenced-plugin build",
     "build:dev": "valenced-plugin build --dev",
+    "package": "bun scripts/package-plugins.ts",
     "generate-index": "valenced-plugin generate-index",
+    "plan-releases": "valenced-plugin plan-releases",
     "serve": "valenced-plugin serve",
     "lint:types": "tsc -b plugins/*/tsconfig.json"
   },
@@ -878,7 +895,11 @@ export function patchSearchMenu(): () => void {
     "@types/react": "^19.0.0",
     "react-native": "0.81.6",
     "typescript": "^7.0.2"
-  }
+  },
+  "trustedDependencies": [
+    "@valenced/plugin-cli",
+    "@swc/core"
+  ]
 }
 `,
   },
@@ -887,8 +908,8 @@ export function patchSearchMenu(): () => void {
     language: 'json',
     summary: 'Repository index metadata matching Valenced/valenced-plugin-template.',
     content: `{
-  "name": "Negative Search Filters Repository",
-  "description": "Valenced plugin repository by horndogcop.",
+  "name": "horndogcop's Valenced Plugins",
+  "description": "Valenced plugins by horndogcop: Hide User Content, Mention Block, and Negative Search Filters.",
   "channels": {}
 }
 `,

@@ -1,0 +1,197 @@
+name: Release Plugins to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'valenced-plugin/**'
+      - 'plugins/**'
+      - 'scripts/**'
+      - 'repo.config.json'
+      - '.github/workflows/release-plugins.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-valenced-pool
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  POOL_BRANCH: ${{ vars.POOL_BRANCH || 'gh-pages' }}
+  PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Detect plugin workspace root
+        id: paths
+        run: |
+          if [ -d "valenced-plugin/plugins" ]; then
+            echo "root=valenced-plugin" >> "$GITHUB_OUTPUT"
+          else
+            echo "root=." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install plugin dependencies
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun install
+
+      - name: Typecheck all plugins
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun lint:types
+
+      - name: Build plugin JS bundles
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun build
+
+      - name: Package plugin ZIP archives
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: bun run --bun package
+
+      - name: Compute GitHub Pages base URL
+        id: pages
+        run: |
+          if [ -n "${PAGES_BASE_URL:-}" ]; then
+            base="${PAGES_BASE_URL%/}"
+          else
+            owner="${GITHUB_REPOSITORY%%/*}"
+            repo="${GITHUB_REPOSITORY#*/}"
+            owner_lc="${owner,,}"
+            base="https://${owner_lc}.github.io"
+            if [ "${repo,,}" != "${owner_lc}.github.io" ]; then
+              base="${base}/${repo}"
+            fi
+          fi
+          echo "base_url=${base}" >> "$GITHUB_OUTPUT"
+          echo "GitHub Pages repository URL will be: ${base}/index.json"
+
+      - name: Checkout or initialize pool branch (${{ env.POOL_BRANCH }})
+        id: pool
+        env:
+          POOL_REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          POOL_DIR="${RUNNER_TEMP}/published"
+          rm -rf "$POOL_DIR"
+          if git clone --depth 1 --branch "$POOL_BRANCH" "$POOL_REMOTE" "$POOL_DIR" 2>/dev/null; then
+            echo "Existing ${POOL_BRANCH} pool has $(find "$POOL_DIR/pool" -name '*.zip' 2>/dev/null | wc -l) artifact(s)."
+          else
+            echo "Creating initial orphan ${POOL_BRANCH} branch."
+            mkdir -p "$POOL_DIR"
+            git -C "$POOL_DIR" init -q -b "$POOL_BRANCH"
+            git -C "$POOL_DIR" remote add origin "$POOL_REMOTE"
+          fi
+          mkdir -p "$POOL_DIR/pool"
+          touch "$POOL_DIR/.nojekyll"
+          git -C "$POOL_DIR" config user.name 'github-actions[bot]'
+          git -C "$POOL_DIR" config user.email 'github-actions[bot]@users.noreply.github.com'
+          git -C "$POOL_DIR" config commit.gpgsign false
+          echo "dir=$POOL_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Plan plugin releases
+        id: plan
+        working-directory: ${{ steps.paths.outputs.root }}
+        run: |
+          PLAN_FILE="${RUNNER_TEMP}/releases.json"
+          bun run --bun plan-releases --pool "${{ steps.pool.outputs.dir }}/pool" --out "$PLAN_FILE"
+          count="$(jq 'length' "$PLAN_FILE")"
+          echo "file=$PLAN_FILE" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Publish planned ZIPs and regenerate index.json
+        working-directory: ${{ steps.paths.outputs.root }}
+        env:
+          POOL_REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          POOL_DIR="${{ steps.pool.outputs.dir }}"
+          PLAN_FILE="${{ steps.plan.outputs.file }}"
+          BASE_URL="${{ steps.pages.outputs.base_url }}"
+          COUNT="${{ steps.plan.outputs.count }}"
+
+          attempt_publish() {
+            mkdir -p "$POOL_DIR/pool"
+            touch "$POOL_DIR/.nojekyll"
+            if [ "$COUNT" != "0" ]; then
+              jq -r '.[] | [.zip, .file] | @tsv' "$PLAN_FILE" | while IFS=$'\t' read -r zip file; do
+                [ -f "$zip" ] || { echo "::error::Missing built archive: $zip"; exit 1; }
+                cp "$zip" "$POOL_DIR/pool/${file}"
+              done
+            fi
+            bun run --bun generate-index \
+              --dist "$POOL_DIR/pool" \
+              --base-url "${BASE_URL}/pool" \
+              --out "$POOL_DIR/index.json"
+            git -C "$POOL_DIR" add .nojekyll pool index.json
+            if git -C "$POOL_DIR" diff --cached --quiet; then
+              echo "Pool and index.json are already up to date."
+              return 0
+            fi
+            if [ "$COUNT" != "0" ]; then
+              git -C "$POOL_DIR" commit -m "Publish ${COUNT} plugin release(s)"
+            else
+              git -C "$POOL_DIR" commit -m "Update plugin repository index"
+            fi
+            git -C "$POOL_DIR" push origin "$POOL_BRANCH"
+          }
+
+          for attempt in 1 2 3; do
+            if attempt_publish; then
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed; syncing with origin/${POOL_BRANCH}..."
+            git -C "$POOL_DIR" fetch origin "$POOL_BRANCH" || break
+            git -C "$POOL_DIR" reset --hard "origin/${POOL_BRANCH}" || break
+          done
+
+          echo "::error::Failed to push ${POOL_BRANCH} after 3 attempts."
+          exit 1
+
+      - name: Tag and create GitHub Releases
+        if: steps.plan.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          jq -r '.[] | [.tag, .id, .version, .zip] | @tsv' "${{ steps.plan.outputs.file }}" |
+            while IFS=$'\t' read -r tag id version zip; do
+              if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+                git tag "$tag"
+                git push origin "$tag"
+              fi
+              if ! gh release view "$tag" >/dev/null 2>&1; then
+                gh release create "$tag" "${{ steps.paths.outputs.root }}/${zip}" \
+                  --title "$tag" \
+                  --notes "Automated Valenced release of \`${id}\` v${version}."
+              fi
+            done
+
+      - name: Upload built plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: valenced-plugins
+          path: |
+            ${{ steps.paths.outputs.root }}/build/dist/*.zip
+            ${{ steps.pool.outputs.dir }}/index.json
+          if-no-files-found: ignore
+
+      - name: Write job summary
+        run: |
+          {
+            echo "### Valenced Plugin Build Summary"
+            echo ""
+            echo "- **Pool branch:** \`${POOL_BRANCH}\`"
+            echo "- **New releases published:** ${{ steps.plan.outputs.count }}"
+            echo "- **Valenced repository URL (once repo is public & GitHub Pages is enabled on \`${POOL_BRANCH}\`):**"
+            echo "  \`${{ steps.pages.outputs.base_url }}/index.json\`"
+          } >> "$GITHUB_STEP_SUMMARY"

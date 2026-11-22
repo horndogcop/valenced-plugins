@@ -1,7 +1,7 @@
 import { getAssetIdByName } from '@valenced/assets'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after } from '@valenced/patcher'
+import { instead } from '@valenced/patcher'
 import { insteadJSX } from '@valenced/react/jsx-runtime'
 import { findInTree } from '@valenced/utils/tree'
 import { cloneElement, isValidElement } from 'react'
@@ -293,7 +293,8 @@ export function patchMessageHiding(): () => void {
         if (!proto || typeof proto.generate !== 'function' || !proto.getTextColor) return
 
         unpatches.push(
-          after(proto, 'generate', ([data], row) => {
+          instead(proto as Record<string, (...args: any[]) => any>, 'generate', ([data], orig) => {
+            const row = orig(data)
             const msg: DiscordMessageLike | undefined = data?.message ?? row?.message
             if (!msg?.id) return row
 
@@ -347,7 +348,7 @@ export function patchMessageHiding(): () => void {
 
             const timestampGroup = findInTree(
               rendered as Record<string, any>,
-              node =>
+              (node: any) =>
                 Boolean(
                   node &&
                     typeof node === 'object' &&
@@ -361,7 +362,7 @@ export function patchMessageHiding(): () => void {
                     ),
                 ),
               { maxDepth: 6 },
-            )
+            ) as { props?: { children?: ReactNode[] } } | undefined
 
             if (timestampGroup && Array.isArray(timestampGroup.props?.children)) {
               timestampGroup.props.children.push(
@@ -400,7 +401,7 @@ export function patchMessageHiding(): () => void {
 
             const bodyContainer = findInTree(
               rendered as Record<string, any>,
-              node =>
+              (node: any) =>
                 Boolean(
                   node &&
                     typeof node === 'object' &&
@@ -408,7 +409,7 @@ export function patchMessageHiding(): () => void {
                     node.props.children.some(isHeaderNode),
                 ),
               { maxDepth: 5 },
-            )
+            ) as { props?: { children?: ReactNode[] } } | undefined
 
             if (bodyContainer && Array.isArray(bodyContainer.props?.children)) {
               const headerNodes: ReactNode[] = []

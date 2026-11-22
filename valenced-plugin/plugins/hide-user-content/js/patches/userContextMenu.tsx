@@ -2,7 +2,7 @@ import { getAssetIdByName } from '@valenced/assets'
 import { ActionSheetActionCreators, ToastActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { before } from '@valenced/patcher'
-import { afterJSX } from '@valenced/react/jsx-runtime'
+import { beforeJSX } from '@valenced/react/jsx-runtime'
 import { findInTree } from '@valenced/utils/tree'
 import { createElement } from 'react'
 import { refreshActiveChannelRows } from '../state'
@@ -30,7 +30,7 @@ function extractTargetUser(source: unknown): DiscordUserLike | undefined {
   }
   return findInTree(
     record,
-    node =>
+    (node: any) =>
       Boolean(
         node &&
           typeof node === 'object' &&
@@ -49,7 +49,7 @@ async function handleToggleUser(user: DiscordUserLike) {
   const label = user.globalName || user.username || user.id
   ToastActionCreators.open('VALENCED_HIDE_USER_TOGGLED', {
     text: hiddenNow ? `Hiding content from ${label}` : `Showing content from ${label}`,
-    icon: getAssetIdByName(hiddenNow ? 'EyeSlashIcon' : 'EyeIcon'),
+    variant: 'default',
   })
 }
 
@@ -73,16 +73,16 @@ function buildActionSheetRow(user: DiscordUserLike) {
 function injectRowIntoTree(tree: ReactElement, user: DiscordUserLike): ReactElement {
   const groupNode = findInTree(
     tree as Record<string, any>,
-    node =>
+    (node: any) =>
       Boolean(
         node &&
           typeof node === 'object' &&
-          (node.type === Design.ActionSheetRowGroup ||
+          (node.type === Design.ActionSheetRow.Group ||
             node.type === Design.TableRowGroup) &&
           Array.isArray(node.props?.children),
       ),
     { maxDepth: 8 },
-  )
+  ) as { props?: { children?: any[] } } | undefined
 
   if (groupNode && Array.isArray(groupNode.props?.children)) {
     const alreadyInjected = groupNode.props.children.some(
@@ -107,11 +107,11 @@ export function patchUserContextMenu(): () => void {
       const isUserSheet =
         (typeof key === 'string' && USER_SHEET_KEYS.has(key)) || Boolean(user?.id)
 
-      if (!isUserSheet || !user?.id || !sheetPromise) return
+      if (!isUserSheet || !user?.id || !sheetPromise) return args
 
-      args[0] = sheetPromise.then(mod => {
+      const wrappedPromise = sheetPromise.then(mod => {
         if (!mod?.default || (mod.default as any).__valencedHidePatched) return mod
-        const OriginalSheet = mod.default
+        const OriginalSheet = mod.default as (sheetProps: any) => ReactElement
 
         const WrappedSheet = (sheetProps: any) => {
           const rendered = OriginalSheet(sheetProps)
@@ -123,39 +123,48 @@ export function patchUserContextMenu(): () => void {
         }
         ;(WrappedSheet as any).__valencedHidePatched = true
 
-        return { ...mod, default: WrappedSheet }
+        return { ...mod, default: WrappedSheet as any }
       })
+
+      return [wrappedPromise, key, props, args[3]]
     }),
   )
 
   // 2. Intercept ContextMenu components rendered in tablet / split layouts
   if (Design.ContextMenu) {
     unpatches.push(
-      afterJSX(Design.ContextMenu, ([, props], res) => {
+      beforeJSX(Design.ContextMenu, ([type, props, key]) => {
         const user = extractTargetUser(props)
-        if (!user?.id || !res || typeof res !== 'object') return res
-
-        const resProps = (res as ReactElement<any>).props
-        if (!Array.isArray(resProps?.children)) return res
+        if (!user?.id || !Array.isArray(props?.items)) {
+          return [type, props, key]
+        }
 
         const hidden = isUserHidden(getCachedSettings(), user.id)
-        const alreadyInjected = resProps.children.some(
-          (child: any) => child?.key === `valenced-hide-ctx-${user.id}`,
+        const targetLabel = hidden ? 'Unhide User Content' : 'Hide User Content'
+        const alreadyInjected = props.items.some(
+          item => !Array.isArray(item) && item?.label === targetLabel,
         )
 
         if (!alreadyInjected) {
-          resProps.children.push(
-            createElement(Design.ContextMenuItem, {
-              key: `valenced-hide-ctx-${user.id}`,
-              label: hidden ? 'Unhide User Content' : 'Hide User Content',
-              action: () => {
-                void handleToggleUser(user)
-              },
-            } as any),
-          )
+          return [
+            type,
+            {
+              ...props,
+              items: [
+                ...props.items,
+                {
+                  label: targetLabel,
+                  action: () => {
+                    void handleToggleUser(user)
+                  },
+                },
+              ],
+            },
+            key,
+          ]
         }
 
-        return res
+        return [type, props, key]
       }),
     )
   }

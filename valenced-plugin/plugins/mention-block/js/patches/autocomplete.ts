@@ -1,7 +1,7 @@
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { after, before } from '@valenced/patcher'
+import { after, before, instead } from '@valenced/patcher'
 import {
   isChannelBlocked,
   isInterceptionBypassed,
@@ -101,14 +101,15 @@ export function patchAutocomplete(): () => void {
   unpatches.push(
     getModules(
       withProps<{
-        setActiveCommand?: (channelId: string, command: any) => void
-        selectCommand?: (channelId: string, command: any) => void
+        setActiveCommand: (channelId: string, command: any) => void
       }>('setActiveCommand'),
       mod => {
         if (typeof mod.setActiveCommand === 'function') {
           unpatches.push(
-            before(mod, 'setActiveCommand', ([, command]) => {
+            before(mod, 'setActiveCommand', args => {
+              const [, command] = args
               setInterceptionBypass(command?.name === REMOVE_COMMAND_NAME)
+              return args
             }),
           )
         }
@@ -126,13 +127,15 @@ export function patchAutocomplete(): () => void {
       }>('queryUserResults', 'queryChannelResults'),
       mod => {
         unpatches.push(
-          after(mod, 'queryUserResults', (args, res) => {
+          instead(mod, 'queryUserResults', (args, orig) => {
+            const res = orig(...args)
             const channelId = args[0]?.id ?? args[0]?.channel_id
             return scrubAutocompletePayload(res, channelId)
           }),
         )
         unpatches.push(
-          after(mod, 'queryChannelResults', (args, res) => {
+          instead(mod, 'queryChannelResults', (args, orig) => {
+            const res = orig(...args)
             const channelId = args[0]?.id ?? args[0]?.channel_id
             return scrubAutocompletePayload(res, channelId)
           }),
@@ -148,7 +151,8 @@ export function patchAutocomplete(): () => void {
       withProps<{ queryResults: (...args: any[]) => any }>('queryResults'),
       mod => {
         unpatches.push(
-          after(mod, 'queryResults', (args, res) => {
+          instead(mod, 'queryResults', (args, orig) => {
+            const res = orig(...args)
             const channelId = args[0]?.id ?? args[0]?.channel_id
             if (res && typeof (res as Promise<any>).then === 'function') {
               return (res as Promise<any>).then(resolved =>
