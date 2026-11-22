@@ -1,6 +1,0 @@
-{
-  "name": "Valenced Hide User Content",
-  "description": "Valenced Discord mobile plugin and interactive simulator for hiding or blurring user images, spoiler-wrapping message blocks, and toggling media via post-timestamp indicators.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}

@@ -1,6 +1,6 @@
 # Valenced Plugins by horndogcop
 
-A collection of custom plugins for [Valenced](https://github.com/Valenced/valenced) (Discord mobile mod), built using the [`valenced-plugin-template`](https://github.com/Valenced/valenced-plugin-template) structure, along with an interactive web preview/simulator and automated GitHub Pages build pipeline.
+A collection of custom plugins for [Valenced](https://github.com/Valenced/valenced) (Discord mobile mod), built using the [`valenced-plugin-template`](https://github.com/Valenced/valenced-plugin-template) structure, with an automated GitHub Pages build pipeline.
 
 > **Disclaimer:** This project was vibe-coded.
 
