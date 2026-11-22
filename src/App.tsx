@@ -257,7 +257,7 @@ export default function App() {
             <div className="text-xs text-slate-400">
               <span>com.valenced.hide-user-content</span>
               <span aria-hidden="true" className="mx-2">·</span>
-              <span>valenced-plugin-template</span>
+              <span>by horndogcop</span>
               <span aria-hidden="true" className="mx-2">·</span>
               <span className="font-mono">v1.0.0</span>
             </div>

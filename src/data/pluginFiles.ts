@@ -15,7 +15,7 @@ export const PLUGIN_SOURCE_FILES: PluginSourceFile[] = [
   "id": "com.valenced.hide-user-content",
   "name": "Hide User Content",
   "description": "Adds a user context menu item to hide or blur images and spoiler-wrap message blocks from selected users.",
-  "author": "Valenced Community",
+  "author": "horndogcop",
   "version": "1.0.0",
   "dependencies": {
     "valenced.api": {
