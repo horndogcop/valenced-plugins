@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Valenced Plugins by horndogcop</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --surface: #171a23;
+      --surface-hover: #1e2330;
+      --border: #2a3040;
+      --text: #e6e8ef;
+      --muted: #9aa3b5;
+      --accent: #5865f2;
+      --accent-hover: #6c77f7;
+      --ok: #23a55a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2.5rem 1.25rem 4rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      line-height: 1.65;
+    }
+    main {
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 {
+      line-height: 1.3;
+      margin-top: 1.75rem;
+      margin-bottom: 0.75rem;
+    }
+    h1 { font-size: 1.85rem; margin-top: 0; }
+    h2 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+    h3 { font-size: 1.1rem; }
+    p { margin: 0.65rem 0; color: var(--text); }
+    a { color: #8ea1ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    blockquote {
+      margin: 1rem 0;
+      padding: 0.65rem 1rem;
+      border-left: 3px solid var(--accent);
+      background: var(--surface);
+      border-radius: 0 8px 8px 0;
+    }
+    blockquote p { margin: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 0.12rem 0.38rem;
+    }
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    ul, ol {
+      padding-left: 1.35rem;
+      margin: 0.65rem 0;
+    }
+    li { margin: 0.4rem 0; }
+    .link-card {
+      margin: 0.85rem 0;
+      padding: 0.75rem 0.95rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: inline-flex;
+      max-width: 100%;
+    }
+    .link-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+    .titled-link {
+      font-weight: 600;
+      color: #a3b3ff;
+    }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface-hover);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .copy-btn:hover {
+      background: var(--accent);
+      border-color: var(--accent-hover);
+      color: #ffffff;
+    }
+    .copy-btn.copied {
+      background: var(--ok);
+      border-color: var(--ok);
+      color: #ffffff;
+    }
+    .copy-btn svg {
+      width: 15px;
+      height: 15px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+<h1>Valenced Plugins by horndogcop</h1>
+<p>A collection of custom plugins for <a href="https://github.com/Valenced/valenced" target="_blank" rel="noopener noreferrer">Valenced</a> (Discord mobile mod), built using the <a href="https://github.com/Valenced/valenced-plugin-template" target="_blank" rel="noopener noreferrer"><code>valenced-plugin-template</code></a> structure, along with an interactive web preview/simulator and automated GitHub Pages build pipeline.</p>
+<blockquote><p><strong>Disclaimer:</strong> This project was vibe-coded.</p></blockquote>
+<h2>Repository URL</h2>
+<p>Copy and add this repository URL in Valenced:</p>
+<div class="link-card"><span class="link-row"><a class="titled-link" href="https://horndogcop.github.io/index.json">Valenced Repository Index (index.json)</a><button type="button" class="copy-btn" data-copy-url="https://horndogcop.github.io/index.json" title="Copy repository URL to clipboard" aria-label="Copy repository URL to clipboard"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+</svg></button></span></div>
+<h2>Plugins</h2>
+<h3>Hide User Content (<code>com.valenced.hide-user-content</code>)</h3>
+<p>Adds a user context menu entry to hide or blur images and optionally spoiler-wrap full message blocks from selected users, with a post-timestamp indicator to toggle displaying hidden images.</p>
+<ul>
+<li><span class="link-row"><a class="titled-link" href="https://horndogcop.github.io/pool/com.valenced.hide-user-content@1.0.0.zip">Hide User Content v1.0.0 (.zip)</a><button type="button" class="copy-btn" data-copy-url="https://horndogcop.github.io/pool/com.valenced.hide-user-content@1.0.0.zip" title="Copy link to clipboard" aria-label="Copy Hide User Content v1.0.0 (.zip) link to clipboard"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+</svg></button></span></li>
+</ul>
+<h3>Mention Block (<code>com.valenced.mention-block</code>)</h3>
+<p>Intercepts <code>@user</code> and <code>#channel</code> mention autocomplete to hide blocked users and channels from suggestions, managed via message, channel, and profile context menus plus slash commands (<code>/mention-add</code>, <code>/mention-remove</code>, <code>/mention-list</code>).</p>
+<ul>
+<li><span class="link-row"><a class="titled-link" href="https://horndogcop.github.io/pool/com.valenced.mention-block@1.0.0.zip">Mention Block v1.0.0 (.zip)</a><button type="button" class="copy-btn" data-copy-url="https://horndogcop.github.io/pool/com.valenced.mention-block@1.0.0.zip" title="Copy link to clipboard" aria-label="Copy Mention Block v1.0.0 (.zip) link to clipboard"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+</svg></button></span></li>
+</ul>
+<h3>Negative Search Filters (<code>com.valenced.negative-search-filters</code>)</h3>
+<p>Adds repeatable client-side negative inline search filters (<code>-from:</code>, <code>-in:</code>, <code>-mentions:</code>, <code>-has:image</code>, <code>-has:embed</code>, <code>-has:attachment</code>, <code>-pinned:true</code>, etc.) that work both when typed inline and from the search filter menu, with no settings page.</p>
+<ul>
+<li><span class="link-row"><a class="titled-link" href="https://horndogcop.github.io/pool/com.valenced.negative-search-filters@1.0.0.zip">Negative Search Filters v1.0.0 (.zip)</a><button type="button" class="copy-btn" data-copy-url="https://horndogcop.github.io/pool/com.valenced.negative-search-filters@1.0.0.zip" title="Copy link to clipboard" aria-label="Copy Negative Search Filters v1.0.0 (.zip) link to clipboard"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+</svg></button></span></li>
+</ul>
+<h2>Automated Builds &amp; GitHub Pages</h2>
+<ol>
+<li>Pushes to <code>main</code> automatically typecheck, bundle, and package every plugin into <code>pool/&lt;id&gt;@&lt;version&gt;.zip</code> and generate <code>index.json</code> + <code>index.html</code> on the <code>gh-pages</code> branch.</li>
+<li>Once the repository is public, enable <strong>Settings -&gt; Pages -&gt; Deploy from a branch -&gt; <code>gh-pages</code> / <code>/ (root)</code></strong> to serve the repository index and plugin archives.</li>
+</ol>
+<h3>Local Build Commands</h3>
+<pre><code>cd valenced-plugin
+bun install
+bun run --bun lint:types
+bun run --bun build
+bun run --bun package</code></pre>
+  </main>
+  <script>
+    const COPY_ICON = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">\n  <rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/>\n  <path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>\n</svg>";
+    const CHECK_ICON = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">\n  <path d=\"M20 6 9 17l-5-5\"/>\n</svg>";
+    async function copyText(value) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+      const el = document.createElement('textarea');
+      el.value = value;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    document.querySelectorAll('.copy-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const value = btn.getAttribute('data-copy-url');
+        if (!value) return;
+        try {
+          await copyText(value);
+          btn.classList.add('copied');
+          btn.innerHTML = CHECK_ICON;
+          window.setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = COPY_ICON;
+          }, 1500);
+        } catch (err) {
+          console.error('Clipboard copy failed:', err);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
