@@ -7,14 +7,14 @@ export interface PluginSourceFile {
 
 export const PLUGIN_SOURCE_FILES: PluginSourceFile[] = [
   {
-    path: 'plugins/mention-block/manifest.json',
+    path: 'plugins/negative-search-filters/manifest.json',
     language: 'json',
     summary: 'Valenced plugin manifest crediting horndogcop and declaring JS bundle entry.',
     content: `{
   "format": 1,
-  "id": "com.valenced.mention-block",
-  "name": "Mention Block",
-  "description": "Intercepts @user and #channel mention autocomplete to block users and channels from suggestions via context menus and commands.",
+  "id": "com.valenced.negative-search-filters",
+  "name": "Negative Search Filters",
+  "description": "Adds repeatable client-side negative inline search filters (-from:, -in:, -has:image, -has:embed, etc.) to Discord mobile search.",
   "author": "horndogcop",
   "version": "1.0.0",
   "dependencies": {
@@ -32,7 +32,7 @@ export const PLUGIN_SOURCE_FILES: PluginSourceFile[] = [
 `,
   },
   {
-    path: 'plugins/mention-block/tsconfig.json',
+    path: 'plugins/negative-search-filters/tsconfig.json',
     language: 'json',
     summary: 'Isolated TypeScript project extending the template tsconfig.base.json.',
     content: `{
@@ -41,647 +41,593 @@ export const PLUGIN_SOURCE_FILES: PluginSourceFile[] = [
 `,
   },
   {
-    path: 'plugins/mention-block/js/index.ts',
+    path: 'plugins/negative-search-filters/js/index.ts',
     language: 'typescript',
-    summary: 'Plugin entrypoint with no SettingsComponent; managed via context menus and commands.',
-    content: `import { patchAutocomplete } from './patches/autocomplete'
-import { patchCommands } from './patches/commands'
-import { patchContextMenus } from './patches/contextMenus'
-import { bindStorage, DEFAULT_STORAGE, setInterceptionBypass } from './storage'
-import type { MentionBlockStorage } from './types'
+    summary: 'Plugin entrypoint with no SettingsComponent; registers filter & menu patches.',
+    content: `import { patchSearchFilter } from './patches/searchFilter'
+import { patchSearchMenu } from './patches/searchMenu'
 
-// Intentionally no SettingsComponent: managed strictly via context menus and commands.
-export default plugin<{ jsonStorage: MentionBlockStorage }>({
-  jsonStorage: {
-    load: true,
-    default: DEFAULT_STORAGE,
-  },
-
-  async start(api) {
-    bindStorage(api.jsonStorage)
-    await api.jsonStorage.get()
-
-    api.cleanup(
-      patchAutocomplete(),
-      patchContextMenus(),
-      patchCommands(),
-      () => setInterceptionBypass(false),
-    )
-  },
-
-  stop() {
-    setInterceptionBypass(false)
+// Intentionally no SettingsComponent: filters are entered inline or via the search menu.
+export default plugin({
+  start(api) {
+    api.cleanup(patchSearchFilter(), patchSearchMenu())
   },
 })
 `,
   },
   {
-    path: 'plugins/mention-block/js/types.ts',
+    path: 'plugins/negative-search-filters/js/types.ts',
     language: 'typescript',
-    summary: 'Storage schema and Discord command/user/channel type contracts.',
-    content: `export interface MentionBlockStorage {
-  /** Blocked user IDs excluded from @user mention autocomplete suggestions. */
-  blockedUsers: Record<string, boolean>
-  /** Blocked channel IDs excluded from #channel mention autocomplete suggestions. */
-  blockedChannels: Record<string, boolean>
+    summary: 'Search filter keys, parsed token types, and message attachment/embed contracts.',
+    content: `export type SearchFilterKey =
+  | 'from'
+  | 'in'
+  | 'mentions'
+  | 'has'
+  | 'pinned'
+  | 'before'
+  | 'after'
+  | 'during'
+
+export interface ParsedFilterToken {
+  raw: string
+  negated: boolean
+  key: SearchFilterKey
+  value: string
 }
 
-export interface DiscordUser {
-  id: string
-  username?: string
-  globalName?: string
+export interface ParsedSearchQuery {
+  /** Free-text search terms after removing all negative filter tokens. */
+  serverQuery: string
+  /** Positive inline filters preserved for server search. */
+  positiveFilters: ParsedFilterToken[]
+  /** Repeatable negative inline filters evaluated client-side. */
+  negativeFilters: ParsedFilterToken[]
 }
 
-export interface DiscordChannel {
-  id: string
-  name?: string
-  guild_id?: string
-  guildId?: string
+export interface SearchAttachmentLike {
+  id?: string
+  filename?: string
+  content_type?: string
+  url?: string
+  width?: number
+  height?: number
 }
 
-export interface DiscordMessage {
+export interface SearchEmbedLike {
+  type?: string
+  url?: string
+  title?: string
+  image?: { url?: string }
+  thumbnail?: { url?: string }
+  video?: { url?: string }
+}
+
+export interface SearchMessageLike {
   id: string
   channel_id?: string
   channelId?: string
-  author?: DiscordUser
-}
-
-export interface CommandOptionArg {
-  name: string
-  type: number
-  value?: string
-  options?: CommandOptionArg[]
-}
-
-export interface CommandContext {
-  channel?: DiscordChannel
-  guild?: { id: string; name?: string }
-}
-
-export interface BuiltInCommand {
-  id: string
-  type: number
-  inputType: number
-  applicationId: string
-  name: string
-  displayName: string
-  description: string
-  displayDescription: string
-  options?: Array<{
-    name: string
-    displayName: string
-    description: string
-    displayDescription: string
-    type: number
-    required?: boolean
-    options?: Array<{
-      name: string
-      displayName: string
-      description: string
-      displayDescription: string
-      type: number
-      required?: boolean
-    }>
-  }>
-  execute: (args: CommandOptionArg[], ctx: CommandContext) => void | Promise<void>
+  content?: string
+  timestamp?: string
+  pinned?: boolean
+  author?: {
+    id: string
+    username?: string
+    globalName?: string
+  }
+  mentions?: Array<{ id: string; username?: string; globalName?: string }>
+  attachments?: SearchAttachmentLike[]
+  embeds?: SearchEmbedLike[]
+  sticker_items?: Array<{ id: string }>
+  stickers?: Array<{ id: string }>
 }
 `,
   },
   {
-    path: 'plugins/mention-block/js/storage.ts',
+    path: 'plugins/negative-search-filters/js/parser.ts',
     language: 'typescript',
-    summary: 'Persistent jsonStorage helpers and autocomplete interception bypass state.',
-    content: `import type { JsonStorage } from '@valenced/json-storage'
-import type { MentionBlockStorage } from './types'
+    summary: 'Tokenizer, repeatable negative filter parser, and client-side message evaluator.',
+    content: `import type {
+  ParsedFilterToken,
+  ParsedSearchQuery,
+  SearchFilterKey,
+  SearchMessageLike,
+} from './types'
 
-export const DEFAULT_STORAGE: MentionBlockStorage = {
-  blockedUsers: {},
-  blockedChannels: {},
-}
+const SUPPORTED_KEYS = new Set<SearchFilterKey>([
+  'from',
+  'in',
+  'mentions',
+  'has',
+  'pinned',
+  'before',
+  'after',
+  'during',
+])
 
-let storageRef: JsonStorage<MentionBlockStorage> | null = null
-let bypassAutocompleteInterception = false
+const IMAGE_EXT_RE = /\\.(png|jpe?g|gif|webp|avif|bmp|heic)(\\?|$)/i
+const VIDEO_EXT_RE = /\\.(mp4|mov|webm|mkv|avi)(\\?|$)/i
+const SOUND_EXT_RE = /\\.(mp3|wav|ogg|flac|m4a|opus)(\\?|$)/i
+const URL_RE = /https?:\\/\\/[^\\s<>]+/i
 
-export function bindStorage(storage: JsonStorage<MentionBlockStorage>): void {
-  storageRef = storage
-}
+function tokenizeRespectingQuotes(input: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let inQuotes = false
 
-export function getCachedStorage(): MentionBlockStorage {
-  return {
-    blockedUsers: { ...(storageRef?.cache?.blockedUsers ?? {}) },
-    blockedChannels: { ...(storageRef?.cache?.blockedChannels ?? {}) },
-  }
-}
-
-export function isUserBlocked(userId?: string): boolean {
-  if (!userId) return false
-  return Boolean(getCachedStorage().blockedUsers[userId])
-}
-
-export function isChannelBlocked(channelId?: string): boolean {
-  if (!channelId) return false
-  return Boolean(getCachedStorage().blockedChannels[channelId])
-}
-
-export async function setUserBlocked(
-  userId: string,
-  blocked: boolean,
-): Promise<boolean> {
-  if (!storageRef) return false
-  const current = await storageRef.get()
-  const nextUsers = { ...current.blockedUsers }
-  if (blocked) {
-    nextUsers[userId] = true
-  } else {
-    delete nextUsers[userId]
-  }
-  await storageRef.set({ blockedUsers: nextUsers })
-  return blocked
-}
-
-export async function toggleUserBlocked(userId: string): Promise<boolean> {
-  return setUserBlocked(userId, !isUserBlocked(userId))
-}
-
-export async function setChannelBlocked(
-  channelId: string,
-  blocked: boolean,
-): Promise<boolean> {
-  if (!storageRef) return false
-  const current = await storageRef.get()
-  const nextChannels = { ...current.blockedChannels }
-  if (blocked) {
-    nextChannels[channelId] = true
-  } else {
-    delete nextChannels[channelId]
-  }
-  await storageRef.set({ blockedChannels: nextChannels })
-  return blocked
-}
-
-export async function toggleChannelBlocked(channelId: string): Promise<boolean> {
-  return setChannelBlocked(channelId, !isChannelBlocked(channelId))
-}
-
-export function setInterceptionBypass(active: boolean): void {
-  bypassAutocompleteInterception = active
-}
-
-export function isInterceptionBypassed(): boolean {
-  return bypassAutocompleteInterception
-}
-`,
-  },
-  {
-    path: 'plugins/mention-block/js/patches/autocomplete.ts',
-    language: 'typescript',
-    summary: 'Intercepts @user and #channel autocomplete results, with bypass for mention-remove.',
-    content: `import { Stores } from '@valenced/discord/flux'
-import { getModules } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
-import { after, before } from '@valenced/patcher'
-import {
-  isChannelBlocked,
-  isInterceptionBypassed,
-  isUserBlocked,
-  setInterceptionBypass,
-} from '../storage'
-
-export const REMOVE_COMMAND_NAME = 'mention-remove'
-export const ADD_COMMAND_NAME = 'mention-add'
-
-function getActiveSlashCommandName(channelId?: string): string | undefined {
-  try {
-    const stores = Stores as Record<string, any>
-    const cmdStore =
-      stores.ApplicationCommandAutocompleteStore ??
-      stores.SlashCommandStore ??
-      stores.ChatInputCommandStore
-    if (cmdStore && channelId) {
-      const active =
-        cmdStore.getActiveCommand?.(channelId) ??
-        cmdStore.getSelectedCommand?.(channelId)
-      if (active?.name) return String(active.name)
-    }
-
-    const draftStore = stores.DraftStore
-    if (draftStore && channelId) {
-      const draft: unknown = draftStore.getDraft?.(channelId, 0)
-      if (typeof draft === 'string' && draft.startsWith('/')) {
-        const firstToken = draft.slice(1).trim().split(/\\s+/)[0]
-        return firstToken
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+    if (ch === '"') {
+      inQuotes = !inQuotes
+      current += ch
+    } else if (/\\s/.test(ch) && !inQuotes) {
+      if (current.length > 0) {
+        tokens.push(current)
+        current = ''
       }
+    } else {
+      current += ch
     }
-  } catch {
-    // Ignore store lookup failures
+  }
+  if (current.length > 0) tokens.push(current)
+  return tokens
+}
+
+function stripQuotes(val: string): string {
+  const trimmed = val.trim()
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+function normalizeFilterKey(rawKey: string): SearchFilterKey | undefined {
+  const k = rawKey.toLowerCase()
+  if (SUPPORTED_KEYS.has(k as SearchFilterKey)) {
+    return k as SearchFilterKey
   }
   return undefined
 }
 
-function shouldBypassForContext(channelId?: string): boolean {
-  if (isInterceptionBypassed()) return true
-  const activeCmd = getActiveSlashCommandName(channelId)
-  return activeCmd === REMOVE_COMMAND_NAME
-}
+export function parseSearchQuery(query: string): ParsedSearchQuery {
+  const tokens = tokenizeRespectingQuotes(query)
+  const serverTokens: string[] = []
+  const positiveFilters: ParsedFilterToken[] = []
+  const negativeFilters: ParsedFilterToken[] = []
 
-function filterUserList(users: unknown[]): unknown[] {
-  return users.filter(entry => {
-    if (!entry || typeof entry !== 'object') return true
-    const rec = entry as Record<string, any>
-    const userId = rec.user?.id ?? rec.id ?? rec.userId
-    return !isUserBlocked(typeof userId === 'string' ? userId : undefined)
-  })
-}
+  for (const raw of tokens) {
+    const match = raw.match(/^(-|!)?([a-zA-Z]+):(.+)$/)
+    if (match) {
+      const negated = Boolean(match[1])
+      const key = normalizeFilterKey(match[2])
+      const value = stripQuotes(match[3])
 
-function filterChannelList(channels: unknown[]): unknown[] {
-  return channels.filter(entry => {
-    if (!entry || typeof entry !== 'object') return true
-    const rec = entry as Record<string, any>
-    const channelId = rec.channel?.id ?? rec.id ?? rec.channelId
-    return !isChannelBlocked(typeof channelId === 'string' ? channelId : undefined)
-  })
-}
-
-function scrubAutocompletePayload(payload: any, channelId?: string): any {
-  if (!payload || typeof payload !== 'object') return payload
-  if (shouldBypassForContext(channelId)) return payload
-
-  const target =
-    payload.results && typeof payload.results === 'object'
-      ? payload.results
-      : payload
-
-  if (Array.isArray(target.users)) target.users = filterUserList(target.users)
-  if (Array.isArray(target.members)) target.members = filterUserList(target.members)
-  if (Array.isArray(target.channels)) target.channels = filterChannelList(target.channels)
-  if (Array.isArray(target.textChannels)) target.textChannels = filterChannelList(target.textChannels)
-  if (Array.isArray(target.voiceChannels)) target.voiceChannels = filterChannelList(target.voiceChannels)
-  if (Array.isArray(target.threads)) target.threads = filterChannelList(target.threads)
-
-  return payload
-}
-
-export function patchAutocomplete(): () => void {
-  const unpatches: Array<() => void> = []
-
-  unpatches.push(
-    getModules(
-      withProps<{
-        setActiveCommand?: (channelId: string, command: any) => void
-      }>('setActiveCommand'),
-      mod => {
-        if (typeof mod.setActiveCommand === 'function') {
-          unpatches.push(
-            before(mod, 'setActiveCommand', ([, command]) => {
-              setInterceptionBypass(command?.name === REMOVE_COMMAND_NAME)
-            }),
-          )
+      if (key && value.length > 0) {
+        const parsed: ParsedFilterToken = {
+          raw,
+          negated,
+          key,
+          value,
         }
-      },
-      { max: 1 },
-    ),
-  )
+        if (negated) {
+          negativeFilters.push(parsed)
+        } else {
+          positiveFilters.push(parsed)
+          if (key === 'has' && value.toLowerCase() === 'attachment') {
+            serverTokens.push('has:file')
+          } else {
+            serverTokens.push(raw)
+          }
+        }
+        continue
+      }
+    }
 
-  unpatches.push(
-    getModules(
-      withProps<{
-        queryUserResults: (...args: any[]) => any
-        queryChannelResults: (...args: any[]) => any
-      }>('queryUserResults', 'queryChannelResults'),
-      mod => {
-        unpatches.push(
-          after(mod, 'queryUserResults', (args, res) => {
-            const channelId = args[0]?.id ?? args[0]?.channel_id
-            return scrubAutocompletePayload(res, channelId)
-          }),
-        )
-        unpatches.push(
-          after(mod, 'queryChannelResults', (args, res) => {
-            const channelId = args[0]?.id ?? args[0]?.channel_id
-            return scrubAutocompletePayload(res, channelId)
-          }),
-        )
-      },
-      { max: 1 },
-    ),
-  )
+    serverTokens.push(raw)
+  }
 
-  unpatches.push(
-    getModules(
-      withProps<{ queryResults: (...args: any[]) => any }>('queryResults'),
-      mod => {
-        unpatches.push(
-          after(mod, 'queryResults', (args, res) => {
-            const channelId = args[0]?.id ?? args[0]?.channel_id
-            if (res && typeof (res as Promise<any>).then === 'function') {
-              return (res as Promise<any>).then(resolved =>
-                scrubAutocompletePayload(resolved, channelId),
-              )
-            }
-            return scrubAutocompletePayload(res, channelId)
-          }),
-        )
-      },
-      { max: 1 },
-    ),
-  )
+  return {
+    serverQuery: serverTokens.join(' ').trim(),
+    positiveFilters,
+    negativeFilters,
+  }
+}
 
-  return () => {
-    setInterceptionBypass(false)
-    for (const unpatch of unpatches) {
-      unpatch()
+export function messageHasAttachment(msg: SearchMessageLike): boolean {
+  return Array.isArray(msg.attachments) && msg.attachments.length > 0
+}
+
+export function messageHasImage(msg: SearchMessageLike): boolean {
+  if (Array.isArray(msg.attachments)) {
+    const hasImgAtt = msg.attachments.some(
+      att =>
+        att.content_type?.startsWith('image/') ||
+        IMAGE_EXT_RE.test(att.filename ?? '') ||
+        IMAGE_EXT_RE.test(att.url ?? '') ||
+        (typeof att.width === 'number' &&
+          typeof att.height === 'number' &&
+          !att.content_type?.startsWith('video/')),
+    )
+    if (hasImgAtt) return true
+  }
+  if (Array.isArray(msg.embeds)) {
+    return msg.embeds.some(
+      embed =>
+        embed.type === 'image' ||
+        embed.type === 'gifv' ||
+        Boolean(embed.image?.url || embed.thumbnail?.url),
+    )
+  }
+  return false
+}
+
+export function messageHasVideo(msg: SearchMessageLike): boolean {
+  if (Array.isArray(msg.attachments)) {
+    const hasVid = msg.attachments.some(
+      att =>
+        att.content_type?.startsWith('video/') ||
+        VIDEO_EXT_RE.test(att.filename ?? '') ||
+        VIDEO_EXT_RE.test(att.url ?? ''),
+    )
+    if (hasVid) return true
+  }
+  if (Array.isArray(msg.embeds)) {
+    return msg.embeds.some(embed => embed.type === 'video' || Boolean(embed.video?.url))
+  }
+  return false
+}
+
+export function messageHasSound(msg: SearchMessageLike): boolean {
+  if (!Array.isArray(msg.attachments)) return false
+  return msg.attachments.some(
+    att =>
+      att.content_type?.startsWith('audio/') ||
+      SOUND_EXT_RE.test(att.filename ?? '') ||
+      SOUND_EXT_RE.test(att.url ?? ''),
+  )
+}
+
+export function messageHasEmbed(msg: SearchMessageLike): boolean {
+  return Array.isArray(msg.embeds) && msg.embeds.length > 0
+}
+
+export function messageHasLink(msg: SearchMessageLike): boolean {
+  if (typeof msg.content === 'string' && URL_RE.test(msg.content)) return true
+  if (Array.isArray(msg.embeds)) {
+    return msg.embeds.some(embed => Boolean(embed.url))
+  }
+  return false
+}
+
+export function messageHasSticker(msg: SearchMessageLike): boolean {
+  return (
+    (Array.isArray(msg.sticker_items) && msg.sticker_items.length > 0) ||
+    (Array.isArray(msg.stickers) && msg.stickers.length > 0)
+  )
+}
+
+function normalizeUserRef(val: string): string {
+  return val.replace(/^<@!?|>$|^@/g, '').trim().toLowerCase()
+}
+
+function normalizeChannelRef(val: string): string {
+  return val.replace(/^<#|>$|^#/g, '').trim().toLowerCase()
+}
+
+function matchesHasPredicate(msg: SearchMessageLike, rawType: string): boolean {
+  const kind = rawType.toLowerCase()
+  switch (kind) {
+    case 'attachment':
+    case 'file':
+      return messageHasAttachment(msg)
+    case 'image':
+      return messageHasImage(msg)
+    case 'video':
+      return messageHasVideo(msg)
+    case 'sound':
+    case 'audio':
+      return messageHasSound(msg)
+    case 'embed':
+      return messageHasEmbed(msg)
+    case 'link':
+      return messageHasLink(msg)
+    case 'sticker':
+      return messageHasSticker(msg)
+    default:
+      return false
+  }
+}
+
+export interface SearchResolutionHelpers {
+  resolveChannelName?: (channelId: string) => string | undefined
+}
+
+function matchesFilter(
+  msg: SearchMessageLike,
+  filter: ParsedFilterToken,
+  helpers?: SearchResolutionHelpers,
+): boolean {
+  switch (filter.key) {
+    case 'from': {
+      const target = normalizeUserRef(filter.value)
+      const authorId = msg.author?.id?.toLowerCase()
+      const username = msg.author?.username?.toLowerCase()
+      const globalName = msg.author?.globalName?.toLowerCase()
+      return authorId === target || username === target || globalName === target
+    }
+    case 'in': {
+      const target = normalizeChannelRef(filter.value)
+      const chId = (msg.channel_id ?? msg.channelId ?? '').toLowerCase()
+      const chName = helpers?.resolveChannelName?.(chId)?.toLowerCase()
+      return chId === target || chName === target
+    }
+    case 'mentions': {
+      const target = normalizeUserRef(filter.value)
+      if (Array.isArray(msg.mentions)) {
+        const found = msg.mentions.some(
+          m =>
+            m.id.toLowerCase() === target ||
+            m.username?.toLowerCase() === target ||
+            m.globalName?.toLowerCase() === target,
+        )
+        if (found) return true
+      }
+      return Boolean(msg.content && msg.content.includes(\`<@\${target}>\`))
+    }
+    case 'has':
+      return matchesHasPredicate(msg, filter.value)
+    case 'pinned': {
+      const expected = filter.value.toLowerCase() !== 'false'
+      return Boolean(msg.pinned) === expected
+    }
+    case 'before':
+    case 'after':
+    case 'during': {
+      if (!msg.timestamp) return false
+      const msgDate = msg.timestamp.slice(0, 10)
+      const targetDate = filter.value.slice(0, 10)
+      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(targetDate)) return false
+      if (filter.key === 'before') return msgDate < targetDate
+      if (filter.key === 'after') return msgDate > targetDate
+      return msgDate === targetDate
+    }
+    default:
+      return false
+  }
+}
+
+export function matchesParsedSearchQuery(
+  msg: SearchMessageLike,
+  parsed: ParsedSearchQuery,
+  helpers?: SearchResolutionHelpers,
+  evaluatePositiveLocally = false,
+): boolean {
+  if (evaluatePositiveLocally) {
+    for (const pos of parsed.positiveFilters) {
+      if (!matchesFilter(msg, pos, helpers)) return false
     }
   }
+
+  for (const neg of parsed.negativeFilters) {
+    if (matchesFilter(msg, neg, helpers)) return false
+  }
+
+  return true
 }
 `,
   },
   {
-    path: 'plugins/mention-block/js/patches/contextMenus.tsx',
+    path: 'plugins/negative-search-filters/js/patches/searchFilter.ts',
     language: 'typescript',
-    summary: 'Adds 2 entries to messages (user + channel), channel context menu, and user profile.',
-    content: `import { getAssetIdByName } from '@valenced/assets'
-import { ActionSheetActionCreators, ToastActionCreators } from '@valenced/discord/actions'
-import { Design } from '@valenced/discord/design'
+    summary: 'Strips negative tokens from server search requests and filters results client-side.',
+    content: `import { Dispatcher } from '@valenced/discord/common/flux'
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
-import { before } from '@valenced/patcher'
-import { afterJSX, insteadJSX } from '@valenced/react/jsx-runtime'
-import { findInTree } from '@valenced/utils/tree'
-import { createElement } from 'react'
-import {
-  isChannelBlocked,
-  isUserBlocked,
-  toggleChannelBlocked,
-  toggleUserBlocked,
-} from '../storage'
-import type { DiscordChannel, DiscordMessage, DiscordUser } from '../types'
-import type { FC, ReactElement } from 'react'
+import { after, before } from '@valenced/patcher'
+import { matchesParsedSearchQuery, parseSearchQuery } from '../parser'
+import type { ParsedSearchQuery, SearchMessageLike } from '../types'
 
-function findMessageInProps(source: unknown): DiscordMessage | undefined {
-  if (!source || typeof source !== 'object') return undefined
-  const rec = source as Record<string, any>
-  if (rec.message && typeof rec.message.id === 'string') {
-    return rec.message as DiscordMessage
-  }
-  return findInTree(
-    rec,
-    node => Boolean(node && typeof node === 'object' && node.message?.id),
-    { maxDepth: 4 },
-  )?.message as DiscordMessage | undefined
+let latestQueryText = ''
+const searchQueryById = new Map<string, ParsedSearchQuery>()
+
+export function setActiveRawSearchQuery(query: string, searchId = 'default'): void {
+  latestQueryText = query
+  searchQueryById.set(searchId, parseSearchQuery(query))
 }
 
-function findChannelInProps(source: unknown): DiscordChannel | undefined {
-  if (!source || typeof source !== 'object') return undefined
-  const rec = source as Record<string, any>
-  if (rec.channel && typeof rec.channel.id === 'string') {
-    return rec.channel as DiscordChannel
-  }
-  if (typeof rec.channelId === 'string') {
-    const channelStore = (Stores as Record<string, any>).ChannelStore
-    return channelStore?.getChannel?.(rec.channelId) ?? { id: rec.channelId }
-  }
-  return findInTree(
-    rec,
-    node => Boolean(node && typeof node === 'object' && node.channel?.id),
-    { maxDepth: 4 },
-  )?.channel as DiscordChannel | undefined
+export function getActiveParsedQuery(searchId = 'default'): ParsedSearchQuery {
+  return searchQueryById.get(searchId) ?? parseSearchQuery(latestQueryText)
 }
 
-function findUserInProps(source: unknown): DiscordUser | undefined {
-  if (!source || typeof source !== 'object') return undefined
-  const rec = source as Record<string, any>
-  if (rec.user && typeof rec.user.id === 'string') {
-    return rec.user as DiscordUser
-  }
-  if (typeof rec.userId === 'string') {
-    const userStore = (Stores as Record<string, any>).UserStore
-    return userStore?.getUser?.(rec.userId) ?? { id: rec.userId }
-  }
-  return findInTree(
-    rec,
-    node => Boolean(node && typeof node === 'object' && node.user?.id),
-    { maxDepth: 4 },
-  )?.user as DiscordUser | undefined
+function resolveChannelName(channelId: string): string | undefined {
+  const channelStore = (Stores as Record<string, any>).ChannelStore
+  return channelStore?.getChannel?.(channelId)?.name
 }
 
-async function handleToggleUserMention(user: DiscordUser) {
-  const blockedNow = await toggleUserBlocked(user.id)
-  ActionSheetActionCreators.hideActionSheet()
-  const label = user.globalName || user.username || user.id
-  ToastActionCreators.open('VALENCED_MENTION_BLOCK_USER', {
-    text: blockedNow
-      ? \`Blocked @\${label} from mention autocomplete\`
-      : \`Restored @\${label} to mention autocomplete\`,
-    icon: getAssetIdByName(blockedNow ? 'CircleXIcon' : 'CheckmarkIcon'),
+function filterSearchMessages(
+  messages: unknown,
+  parsed: ParsedSearchQuery,
+): { filtered: unknown; removedCount: number } {
+  if (!Array.isArray(messages) || parsed.negativeFilters.length === 0) {
+    return { filtered: messages, removedCount: 0 }
+  }
+
+  let removedCount = 0
+  const helpers = { resolveChannelName }
+
+  if (Array.isArray(messages[0])) {
+    const groups = (messages as SearchMessageLike[][]).filter(group => {
+      const hitMsg = group.find((m: any) => m?.hit) ?? group[0]
+      if (!hitMsg) return false
+      const keep = matchesParsedSearchQuery(hitMsg, parsed, helpers, false)
+      if (!keep) removedCount += 1
+      return keep
+    })
+    return { filtered: groups, removedCount }
+  }
+
+  const flat = (messages as SearchMessageLike[]).filter(msg => {
+    const keep = matchesParsedSearchQuery(msg, parsed, helpers, false)
+    if (!keep) removedCount += 1
+    return keep
   })
+
+  return { filtered: flat, removedCount }
 }
 
-async function handleToggleChannelMention(channel: DiscordChannel) {
-  const blockedNow = await toggleChannelBlocked(channel.id)
-  ActionSheetActionCreators.hideActionSheet()
-  const label = channel.name ? \`#\${channel.name}\` : channel.id
-  ToastActionCreators.open('VALENCED_MENTION_BLOCK_CHANNEL', {
-    text: blockedNow
-      ? \`Blocked \${label} from mention autocomplete\`
-      : \`Restored \${label} to mention autocomplete\`,
-    icon: getAssetIdByName(blockedNow ? 'CircleXIcon' : 'CheckmarkIcon'),
-  })
-}
-
-function createActionRow(
-  key: string,
-  label: string,
-  iconName: string,
-  onPress: () => void,
-) {
-  const iconId = getAssetIdByName(iconName)
-  return createElement(Design.ActionSheetRow, {
-    key,
-    label,
-    icon: iconId
-      ? createElement(Design.ActionSheetRow.Icon ?? 'View', { source: iconId } as any)
-      : undefined,
-    onPress,
-  } as any)
-}
-
-function appendRowsToSheetTree(tree: ReactElement, rows: ReactElement[]): ReactElement {
-  const groupNode = findInTree(
-    tree as Record<string, any>,
-    node =>
-      Boolean(
-        node &&
-          typeof node === 'object' &&
-          (node.type === Design.ActionSheetRowGroup ||
-            node.type === Design.TableRowGroup) &&
-          Array.isArray(node.props?.children),
-      ),
-    { maxDepth: 8 },
-  )
-
-  if (groupNode && Array.isArray(groupNode.props?.children)) {
-    for (const row of rows) {
-      const exists = groupNode.props.children.some(
-        (child: any) => child?.key === row.key,
-      )
-      if (!exists) {
-        groupNode.props.children.push(row)
+function stripNegativeTokensFromRestQuery(url: string): string {
+  try {
+    const [base, queryString] = url.split('?')
+    if (!queryString) return url
+    const params = new URLSearchParams(queryString)
+    const content = params.get('content')
+    if (content) {
+      const parsed = parseSearchQuery(content)
+      if (parsed.negativeFilters.length > 0) {
+        setActiveRawSearchQuery(content)
+        if (parsed.serverQuery) {
+          params.set('content', parsed.serverQuery)
+        } else {
+          params.delete('content')
+        }
       }
     }
+    const nextQs = params.toString()
+    return nextQs ? \`\${base}?\${nextQs}\` : base
+  } catch {
+    return url
   }
-
-  return tree
 }
 
-export function patchContextMenus(): () => void {
+export function patchSearchFilter(): () => void {
   const unpatches: Array<() => void> = []
 
   unpatches.push(
-    before(ActionSheetActionCreators, 'openLazy', args => {
-      const [sheetPromise, key, props] = args
-      if (!sheetPromise) return
+    getModules(
+      withProps<{ tokenize: (query: string) => any[] }>('tokenize'),
+      mod => {
+        unpatches.push(
+          after(mod, 'tokenize', ([query], tokens) => {
+            if (typeof query !== 'string' || !Array.isArray(tokens)) return tokens
+            setActiveRawSearchQuery(query)
+            const parsed = parseSearchQuery(query)
+            if (parsed.negativeFilters.length === 0) return tokens
 
-      const message = findMessageInProps(props)
-      const channel =
-        findChannelInProps(props) ??
-        (message
-          ? findChannelInProps({
-              channelId: message.channel_id ?? message.channelId,
+            const negValues = new Set(parsed.negativeFilters.map(n => n.raw))
+            return tokens.map(token => {
+              const text = String(token?.fullMatch ?? token?.text ?? '')
+              if (negValues.has(text)) {
+                return {
+                  ...token,
+                  type: \`NEGATED_FILTER_\${token?.type ?? 'INLINE'}\`,
+                  isNegatedFilter: true,
+                }
+              }
+              return token
             })
-          : undefined)
-      const user = message?.author ?? findUserInProps(props)
+          }),
+        )
+      },
+      { max: 1 },
+    ),
+  )
 
-      const sheetKey = typeof key === 'string' ? key : ''
-      const isMessageSheet = /message/i.test(sheetKey) || Boolean(message?.id)
-      const isChannelSheet =
-        !isMessageSheet && (/channel/i.test(sheetKey) || Boolean(channel?.id))
-      const isUserProfileSheet =
-        !isMessageSheet &&
-        !isChannelSheet &&
-        (/user|profile/i.test(sheetKey) || Boolean(user?.id))
-
-      if (!isMessageSheet && !isChannelSheet && !isUserProfileSheet) return
-
-      args[0] = sheetPromise.then(mod => {
-        if (!mod?.default || (mod.default as any).__valencedMentionBlockPatched) {
-          return mod
-        }
-        const OriginalSheet = mod.default
-
-        const WrappedSheet = (sheetProps: any) => {
-          const rendered = OriginalSheet(sheetProps)
-          if (!rendered) return rendered
-
-          const rowsToInject: ReactElement[] = []
-
-          if (isMessageSheet) {
-            const msg = findMessageInProps(sheetProps) ?? message
-            const msgUser = msg?.author ?? user
-            const msgChannel =
-              findChannelInProps(sheetProps) ??
-              (msg
-                ? findChannelInProps({
-                    channelId: msg.channel_id ?? msg.channelId,
-                  })
-                : channel)
-
-            if (msgUser?.id) {
-              const blocked = isUserBlocked(msgUser.id)
-              rowsToInject.push(
-                createActionRow(
-                  \`valenced-mb-msg-user-\${msgUser.id}\`,
-                  blocked
-                    ? 'Unblock User from Mentions'
-                    : 'Block User from Mentions',
-                  blocked ? 'CheckmarkIcon' : 'CircleXIcon',
-                  () => void handleToggleUserMention(msgUser),
-                ),
-              )
+  unpatches.push(
+    getModules(
+      withProps<{ search: (...args: any[]) => any }>('search'),
+      mod => {
+        unpatches.push(
+          before(mod, 'search', args => {
+            const [searchId, query] = args
+            if (typeof query === 'string') {
+              setActiveRawSearchQuery(query, String(searchId ?? 'default'))
+              const parsed = parseSearchQuery(query)
+              if (parsed.negativeFilters.length > 0) {
+                args[1] = parsed.serverQuery
+              }
+            } else if (
+              query &&
+              typeof query === 'object' &&
+              typeof query.content === 'string'
+            ) {
+              setActiveRawSearchQuery(query.content, String(searchId ?? 'default'))
+              const parsed = parseSearchQuery(query.content)
+              if (parsed.negativeFilters.length > 0) {
+                args[1] = { ...query, content: parsed.serverQuery }
+              }
             }
+          }),
+        )
+      },
+      { max: 1 },
+    ),
+  )
 
-            if (msgChannel?.id) {
-              const blocked = isChannelBlocked(msgChannel.id)
-              rowsToInject.push(
-                createActionRow(
-                  \`valenced-mb-msg-chan-\${msgChannel.id}\`,
-                  blocked
-                    ? 'Unblock Channel from Mentions'
-                    : 'Block Channel from Mentions',
-                  blocked ? 'CheckmarkIcon' : 'CircleXIcon',
-                  () => void handleToggleChannelMention(msgChannel),
-                ),
-              )
+  unpatches.push(
+    getModules(
+      withProps<{ get: (req: any) => Promise<any> }>('get', 'post', 'put'),
+      restApi => {
+        unpatches.push(
+          before(restApi, 'get', ([req]) => {
+            if (
+              req &&
+              typeof req.url === 'string' &&
+              req.url.includes('/messages/search')
+            ) {
+              req.url = stripNegativeTokensFromRestQuery(req.url)
             }
-          } else if (isChannelSheet && channel?.id) {
-            const targetChannel = findChannelInProps(sheetProps) ?? channel
-            const blocked = isChannelBlocked(targetChannel.id)
-            rowsToInject.push(
-              createActionRow(
-                \`valenced-mb-chan-\${targetChannel.id}\`,
-                blocked
-                  ? 'Unblock Channel from Mentions'
-                  : 'Block Channel from Mentions',
-                blocked ? 'CheckmarkIcon' : 'CircleXIcon',
-                () => void handleToggleChannelMention(targetChannel),
-              ),
-            )
-          } else if (isUserProfileSheet && user?.id) {
-            const targetUser = findUserInProps(sheetProps) ?? user
-            const blocked = isUserBlocked(targetUser.id)
-            rowsToInject.push(
-              createActionRow(
-                \`valenced-mb-user-\${targetUser.id}\`,
-                blocked
-                  ? 'Unblock User from Mentions'
-                  : 'Block User from Mentions',
-                blocked ? 'CheckmarkIcon' : 'CircleXIcon',
-                () => void handleToggleUserMention(targetUser),
-              ),
-            )
-          }
+          }),
+        )
+      },
+      { max: 1 },
+    ),
+  )
 
-          return rowsToInject.length > 0
-            ? appendRowsToSheetTree(rendered, rowsToInject)
-            : rendered
-        }
+  unpatches.push(
+    before(Dispatcher as any, 'dispatch', ([payload]) => {
+      if (!payload || typeof payload !== 'object') return
+      if (payload.type !== 'SEARCH_FINISH') return
 
-        ;(WrappedSheet as any).__valencedMentionBlockPatched = true
-        return { ...mod, default: WrappedSheet }
-      })
+      const parsed = getActiveParsedQuery(String(payload.id ?? 'default'))
+      if (parsed.negativeFilters.length === 0) return
+
+      const { filtered, removedCount } = filterSearchMessages(
+        payload.messages,
+        parsed,
+      )
+      payload.messages = filtered
+      if (typeof payload.totalResults === 'number') {
+        payload.totalResults = Math.max(0, payload.totalResults - removedCount)
+      }
     }),
   )
 
   unpatches.push(
     getModules(
-      withProps<{ UserProfileActions: FC<any> }>('UserProfileActions'),
-      ({ UserProfileActions }) => {
+      withProps<{ getSearchResults: (id: string) => any }>('getSearchResults'),
+      searchStore => {
         unpatches.push(
-          insteadJSX(UserProfileActions, ([type, props, key], jsx) => {
-            const rendered = jsx(type, props, key)
-            const user = findUserInProps(props)
-            if (!user?.id || !rendered || typeof rendered !== 'object') {
-              return rendered
-            }
+          after(searchStore, 'getSearchResults', ([searchId], res) => {
+            if (!res || typeof res !== 'object') return res
+            const parsed = getActiveParsedQuery(String(searchId ?? 'default'))
+            if (parsed.negativeFilters.length === 0) return res
 
-            const blocked = isUserBlocked(user.id)
-            const children = (rendered as ReactElement<any>).props?.children
-            if (Array.isArray(children)) {
-              const btnKey = \`valenced-mb-profile-btn-\${user.id}\`
-              if (!children.some((c: any) => c?.key === btnKey)) {
-                children.push(
-                  createElement(Design.Button, {
-                    key: btnKey,
-                    size: 'sm',
-                    variant: blocked ? 'secondary' : 'destructive',
-                    text: blocked ? 'Unblock Mentions' : 'Block Mentions',
-                    onPress: () => void handleToggleUserMention(user),
-                  }),
-                )
+            if (Array.isArray(res.results)) {
+              const { filtered, removedCount } = filterSearchMessages(
+                res.results,
+                parsed,
+              )
+              return {
+                ...res,
+                results: filtered,
+                totalResults:
+                  typeof res.totalResults === 'number'
+                    ? Math.max(0, res.totalResults - removedCount)
+                    : res.totalResults,
               }
             }
-
-            return rendered
+            return res
           }),
         )
       },
@@ -689,60 +635,9 @@ export function patchContextMenus(): () => void {
     ),
   )
 
-  if (Design.ContextMenu) {
-    unpatches.push(
-      afterJSX(Design.ContextMenu, ([, props], res) => {
-        if (!res || typeof res !== 'object') return res
-        const resProps = (res as ReactElement<any>).props
-        if (!Array.isArray(resProps?.children)) return res
-
-        const msg = findMessageInProps(props)
-        const channel = findChannelInProps(props)
-        const user = msg?.author ?? findUserInProps(props)
-
-        if (user?.id) {
-          const blocked = isUserBlocked(user.id)
-          const itemKey = \`valenced-mb-ctx-user-\${user.id}\`
-          if (!resProps.children.some((c: any) => c?.key === itemKey)) {
-            resProps.children.push(
-              createElement(Design.ContextMenuItem, {
-                key: itemKey,
-                label: blocked
-                  ? 'Unblock User from Mentions'
-                  : 'Block User from Mentions',
-                action: () => void handleToggleUserMention(user),
-              } as any),
-            )
-          }
-        }
-
-        const targetChannel =
-          channel ??
-          (msg
-            ? findChannelInProps({ channelId: msg.channel_id ?? msg.channelId })
-            : undefined)
-        if (targetChannel?.id) {
-          const blocked = isChannelBlocked(targetChannel.id)
-          const itemKey = \`valenced-mb-ctx-chan-\${targetChannel.id}\`
-          if (!resProps.children.some((c: any) => c?.key === itemKey)) {
-            resProps.children.push(
-              createElement(Design.ContextMenuItem, {
-                key: itemKey,
-                label: blocked
-                  ? 'Unblock Channel from Mentions'
-                  : 'Block Channel from Mentions',
-                action: () => void handleToggleChannelMention(targetChannel),
-              } as any),
-            )
-          }
-        }
-
-        return res
-      }),
-    )
-  }
-
   return () => {
+    searchQueryById.clear()
+    latestQueryText = ''
     for (const unpatch of unpatches) {
       unpatch()
     }
@@ -751,370 +646,201 @@ export function patchContextMenus(): () => void {
 `,
   },
   {
-    path: 'plugins/mention-block/js/patches/commands.ts',
+    path: 'plugins/negative-search-filters/js/patches/searchMenu.tsx',
     language: 'typescript',
-    summary: 'Registers /mention-add, /mention-remove (bypass), and ephemeral /mention-list.',
-    content: `import { Stores } from '@valenced/discord/flux'
-import { getModules, lookupModule } from '@valenced/modules/finders'
+    summary: 'Extends Discord search filter menu and autocomplete with repeatable negative filter tokens.',
+    content: `import { Design } from '@valenced/discord/design'
+import { getModules } from '@valenced/modules/finders'
 import { withProps } from '@valenced/modules/finders/filters'
 import { after } from '@valenced/patcher'
-import {
-  getCachedStorage,
-  setChannelBlocked,
-  setInterceptionBypass,
-  setUserBlocked,
-} from '../storage'
-import { ADD_COMMAND_NAME, REMOVE_COMMAND_NAME } from './autocomplete'
-import type {
-  BuiltInCommand,
-  CommandContext,
-  CommandOptionArg,
-} from '../types'
+import { insteadJSX } from '@valenced/react/jsx-runtime'
+import { useState } from 'react'
+import { Pressable, StyleSheet, View } from 'react-native'
+import { setActiveRawSearchQuery } from './searchFilter'
 
-const ApplicationCommandType = {
-  CHAT: 1,
-} as const
+const { Text } = Design
 
-const ApplicationCommandInputType = {
-  BUILT_IN: 0,
-} as const
+const NEGATIVE_FILTER_DEFINITIONS = [
+  { key: '-from:', hint: 'Exclude user', example: '-from:username' },
+  { key: '-in:', hint: 'Exclude channel', example: '-in:channel' },
+  { key: '-mentions:', hint: 'Exclude mentioned user', example: '-mentions:username' },
+  { key: '-has:image', hint: 'Exclude images', example: '-has:image' },
+  { key: '-has:embed', hint: 'Exclude embeds', example: '-has:embed' },
+  { key: '-has:link', hint: 'Exclude links', example: '-has:link' },
+  { key: '-has:attachment', hint: 'Exclude files', example: '-has:attachment' },
+  { key: '-has:video', hint: 'Exclude videos', example: '-has:video' },
+  { key: '-pinned:true', hint: 'Exclude pinned', example: '-pinned:true' },
+] as const
 
-const ApplicationCommandOptionType = {
-  SUB_COMMAND: 1,
-  USER: 6,
-  CHANNEL: 7,
-} as const
+const HAS_SUGGESTIONS = [
+  'image',
+  'embed',
+  'link',
+  'attachment',
+  'file',
+  'video',
+  'sound',
+  'sticker',
+]
 
-function parseMentionOrId(raw?: string): string | undefined {
-  if (!raw) return undefined
-  const trimmed = String(raw).trim()
-  const mentionMatch = trimmed.match(/^<(?:@!?|#)(\\d+)>$/)
-  if (mentionMatch) return mentionMatch[1]
-  if (/^\\d+$/.test(trimmed)) return trimmed
-  return trimmed
+const styles = StyleSheet.create({
+  menuSection: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  negateToggle: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  negateToggleActive: {
+    backgroundColor: '#DA373C',
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  filterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+})
+
+function appendInlineFilter(
+  currentQuery: string,
+  token: string,
+  onUpdateQuery?: (next: string) => void,
+) {
+  const base = currentQuery.trimEnd()
+  const next = base.length > 0 ? \`\${base} \${token}\` : token
+  setActiveRawSearchQuery(next)
+  onUpdateQuery?.(next)
 }
 
-function getSubcommandAndTarget(args: CommandOptionArg[]): {
-  subcommand?: string
-  targetId?: string
-} {
-  if (!Array.isArray(args) || args.length === 0) return {}
-  const first = args[0]
-  if (
-    first.type === ApplicationCommandOptionType.SUB_COMMAND ||
-    Array.isArray(first.options)
-  ) {
-    const nested = first.options?.[0]
-    return {
-      subcommand: first.name,
-      targetId: parseMentionOrId(nested?.value),
-    }
-  }
-  return {
-    subcommand: first.name,
-    targetId: parseMentionOrId(first.value),
-  }
+function NegativeFilterMenuExtension({
+  query,
+  onUpdateQuery,
+}: {
+  query: string
+  onUpdateQuery?: (next: string) => void
+}) {
+  const [negateMode, setNegateMode] = useState(true)
+
+  return (
+    <View style={styles.menuSection}>
+      <View style={styles.headerRow}>
+        <Text variant="text-xs/semibold" color="text-muted">
+          Negative Filters (Repeatable)
+        </Text>
+        <Pressable
+          style={[styles.negateToggle, negateMode && styles.negateToggleActive]}
+          onPress={() => setNegateMode(v => !v)}
+        >
+          <Text variant="text-xs/semibold" color="text-normal">
+            {negateMode ? 'Negate (-): ON' : 'Negate (-): OFF'}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.chipGrid}>
+        {NEGATIVE_FILTER_DEFINITIONS.map(item => {
+          const token = negateMode ? item.key : item.key.replace(/^-/, '')
+          return (
+            <Pressable
+              key={item.key}
+              style={styles.filterChip}
+              onPress={() => appendInlineFilter(query, token, onUpdateQuery)}
+            >
+              <Text variant="text-xs/medium" color="text-normal">
+                {token}
+              </Text>
+            </Pressable>
+          )
+        })}
+      </View>
+    </View>
+  )
 }
 
-function sendEphemeralMessage(channelId: string, content: string): void {
-  const [messageActions] = lookupModule<{
-    sendBotMessage?: (channelId: string, content: string) => void
-  }>(withProps('sendBotMessage'))
-
-  if (typeof messageActions?.sendBotMessage === 'function') {
-    messageActions.sendBotMessage(channelId, content)
-    return
-  }
-
-  const dispatcher = (Stores as Record<string, any>).Dispatcher
-  dispatcher?.dispatch?.({
-    type: 'MESSAGE_CREATE',
-    channelId,
-    message: {
-      id: \`valenced-ephemeral-\${Date.now()}\`,
-      channel_id: channelId,
-      content,
-      flags: 64,
-      author: {
-        id: '1',
-        username: 'Clyde',
-        bot: true,
-      },
-      timestamp: new Date().toISOString(),
-    },
-  })
-}
-
-function createCommands(): BuiltInCommand[] {
-  const addCommand: BuiltInCommand = {
-    id: '-91101',
-    type: ApplicationCommandType.CHAT,
-    inputType: ApplicationCommandInputType.BUILT_IN,
-    applicationId: '-1',
-    name: ADD_COMMAND_NAME,
-    displayName: ADD_COMMAND_NAME,
-    description:
-      'Block a user or channel from appearing in mention autocomplete.',
-    displayDescription:
-      'Block a user or channel from appearing in mention autocomplete.',
-    options: [
-      {
-        name: 'user',
-        displayName: 'user',
-        description:
-          'Block a user from @mention autocomplete (accepts intercepted mentions).',
-        displayDescription:
-          'Block a user from @mention autocomplete (accepts intercepted mentions).',
-        type: ApplicationCommandOptionType.SUB_COMMAND,
-        options: [
-          {
-            name: 'target',
-            displayName: 'target',
-            description: 'User mention (@user) or user ID to block.',
-            displayDescription: 'User mention (@user) or user ID to block.',
-            type: ApplicationCommandOptionType.USER,
-            required: true,
-          },
-        ],
-      },
-      {
-        name: 'channel',
-        displayName: 'channel',
-        description:
-          'Block a channel from #mention autocomplete (accepts intercepted mentions).',
-        displayDescription:
-          'Block a channel from #mention autocomplete (accepts intercepted mentions).',
-        type: ApplicationCommandOptionType.SUB_COMMAND,
-        options: [
-          {
-            name: 'target',
-            displayName: 'target',
-            description: 'Channel mention (#channel) or channel ID to block.',
-            displayDescription:
-              'Channel mention (#channel) or channel ID to block.',
-            type: ApplicationCommandOptionType.CHANNEL,
-            required: true,
-          },
-        ],
-      },
-    ],
-    async execute(args, ctx) {
-      const channelId = ctx.channel?.id
-      if (!channelId) return
-      const { subcommand, targetId } = getSubcommandAndTarget(args)
-      if (!targetId) {
-        sendEphemeralMessage(
-          channelId,
-          'Specify a valid user or channel mention.',
-        )
-        return
-      }
-
-      if (subcommand === 'user') {
-        await setUserBlocked(targetId, true)
-        sendEphemeralMessage(
-          channelId,
-          \`Blocked <@\${targetId}> from mention autocomplete.\`,
-        )
-      } else if (subcommand === 'channel') {
-        await setChannelBlocked(targetId, true)
-        sendEphemeralMessage(
-          channelId,
-          \`Blocked <#\${targetId}> from mention autocomplete.\`,
-        )
-      }
-    },
-  }
-
-  const removeCommand: BuiltInCommand = {
-    id: '-91102',
-    type: ApplicationCommandType.CHAT,
-    inputType: ApplicationCommandInputType.BUILT_IN,
-    applicationId: '-1',
-    name: REMOVE_COMMAND_NAME,
-    displayName: REMOVE_COMMAND_NAME,
-    description:
-      'Restore a blocked user or channel to mention autocomplete (bypasses interception).',
-    displayDescription:
-      'Restore a blocked user or channel to mention autocomplete (bypasses interception).',
-    options: [
-      {
-        name: 'user',
-        displayName: 'user',
-        description: 'Restore a blocked user to @mention autocomplete.',
-        displayDescription: 'Restore a blocked user to @mention autocomplete.',
-        type: ApplicationCommandOptionType.SUB_COMMAND,
-        options: [
-          {
-            name: 'target',
-            displayName: 'target',
-            description: 'User to restore (interception bypassed).',
-            displayDescription: 'User to restore (interception bypassed).',
-            type: ApplicationCommandOptionType.USER,
-            required: true,
-          },
-        ],
-      },
-      {
-        name: 'channel',
-        displayName: 'channel',
-        description: 'Restore a blocked channel to #mention autocomplete.',
-        displayDescription:
-          'Restore a blocked channel to #mention autocomplete.',
-        type: ApplicationCommandOptionType.SUB_COMMAND,
-        options: [
-          {
-            name: 'target',
-            displayName: 'target',
-            description: 'Channel to restore (interception bypassed).',
-            displayDescription: 'Channel to restore (interception bypassed).',
-            type: ApplicationCommandOptionType.CHANNEL,
-            required: true,
-          },
-        ],
-      },
-    ],
-    async execute(args, ctx) {
-      setInterceptionBypass(false)
-      const channelId = ctx.channel?.id
-      if (!channelId) return
-      const { subcommand, targetId } = getSubcommandAndTarget(args)
-      if (!targetId) {
-        sendEphemeralMessage(
-          channelId,
-          'Specify a valid user or channel mention.',
-        )
-        return
-      }
-
-      if (subcommand === 'user') {
-        await setUserBlocked(targetId, false)
-        sendEphemeralMessage(
-          channelId,
-          \`Restored <@\${targetId}> to mention autocomplete.\`,
-        )
-      } else if (subcommand === 'channel') {
-        await setChannelBlocked(targetId, false)
-        sendEphemeralMessage(
-          channelId,
-          \`Restored <#\${targetId}> to mention autocomplete.\`,
-        )
-      }
-    },
-  }
-
-  // Listing command: no subcommands, ephemeral message scoped to current server.
-  // Command mentions are omitted because Discord/Valenced cannot prefill parameters.
-  const listCommand: BuiltInCommand = {
-    id: '-91103',
-    type: ApplicationCommandType.CHAT,
-    inputType: ApplicationCommandInputType.BUILT_IN,
-    applicationId: '-1',
-    name: 'mention-list',
-    displayName: 'mention-list',
-    description: 'List blocked users and channels from the current server.',
-    displayDescription:
-      'List blocked users and channels from the current server.',
-    execute(_args, ctx: CommandContext) {
-      const channelId = ctx.channel?.id
-      if (!channelId) return
-
-      const stores = Stores as Record<string, any>
-      const channelStore = stores.ChannelStore
-      const guildMemberStore = stores.GuildMemberStore
-      const currentChannel = ctx.channel ?? channelStore?.getChannel?.(channelId)
-      const guildId: string | undefined =
-        ctx.guild?.id ?? currentChannel?.guild_id ?? currentChannel?.guildId
-
-      if (!guildId) {
-        sendEphemeralMessage(
-          channelId,
-          'Run \`/mention-list\` inside a server channel to view blocked users and channels for that server.',
-        )
-        return
-      }
-
-      const { blockedUsers, blockedChannels } = getCachedStorage()
-
-      const serverChannels = Object.keys(blockedChannels).filter(id => {
-        if (!blockedChannels[id]) return false
-        const ch = channelStore?.getChannel?.(id)
-        return (ch?.guild_id ?? ch?.guildId) === guildId
-      })
-
-      const serverUsers = Object.keys(blockedUsers).filter(id => {
-        if (!blockedUsers[id]) return false
-        return Boolean(guildMemberStore?.getMember?.(guildId, id))
-      })
-
-      const channelLines =
-        serverChannels.length > 0
-          ? serverChannels.map(id => \`• <#\${id}>\`).join('\\n')
-          : '• None'
-
-      const userLines =
-        serverUsers.length > 0
-          ? serverUsers.map(id => \`• <@\${id}>\`).join('\\n')
-          : '• None'
-
-      const message = [
-        '**Blocked Mentions in This Server**',
-        '',
-        '**Blocked Channels**',
-        channelLines,
-        '',
-        '**Blocked Users**',
-        userLines,
-      ].join('\\n')
-
-      sendEphemeralMessage(channelId, message)
-    },
-  }
-
-  return [addCommand, removeCommand, listCommand]
-}
-
-export function patchCommands(): () => void {
+export function patchSearchMenu(): () => void {
   const unpatches: Array<() => void> = []
-  const commands = createCommands()
-  const commandIds = new Set(commands.map(c => c.id))
 
   unpatches.push(
     getModules(
       withProps<{
-        BUILT_IN_COMMANDS?: BuiltInCommand[]
-        getBuiltInCommands?: (type?: number) => BuiltInCommand[]
-      }>('getBuiltInCommands'),
+        getSearchFilterSuggestions: (query: string, guildId?: string) => any[]
+      }>('getSearchFilterSuggestions'),
       mod => {
-        if (Array.isArray(mod.BUILT_IN_COMMANDS)) {
-          for (const cmd of commands) {
-            if (!mod.BUILT_IN_COMMANDS.some(c => c.id === cmd.id)) {
-              mod.BUILT_IN_COMMANDS.push(cmd)
-            }
-          }
-          unpatches.push(() => {
-            if (!Array.isArray(mod.BUILT_IN_COMMANDS)) return
-            for (let i = mod.BUILT_IN_COMMANDS.length - 1; i >= 0; i--) {
-              if (commandIds.has(mod.BUILT_IN_COMMANDS[i]?.id)) {
-                mod.BUILT_IN_COMMANDS.splice(i, 1)
-              }
-            }
-          })
-        }
+        unpatches.push(
+          after(mod, 'getSearchFilterSuggestions', ([query], suggestions) => {
+            if (typeof query !== 'string') return suggestions
+            const lastToken = query.split(/\\s+/).pop() ?? ''
+            if (!lastToken.startsWith('-')) return suggestions
 
-        if (typeof mod.getBuiltInCommands === 'function') {
-          unpatches.push(
-            after(mod, 'getBuiltInCommands', ([type], res) => {
-              if (type !== undefined && type !== ApplicationCommandType.CHAT) {
-                return res
-              }
-              if (!Array.isArray(res)) return res
-              const existing = new Set(res.map((c: BuiltInCommand) => c.id))
-              const missing = commands.filter(c => !existing.has(c.id))
-              return missing.length > 0 ? [...res, ...missing] : res
-            }),
-          )
-        }
+            const hasPrefixMatch = lastToken.match(/^-has:(.*)$/i)
+            if (hasPrefixMatch) {
+              const partial = hasPrefixMatch[1].toLowerCase()
+              return HAS_SUGGESTIONS.filter(opt => opt.startsWith(partial)).map(
+                opt => ({
+                  token: \`-has:\${opt}\`,
+                  label: \`-has:\${opt}\`,
+                  description: \`Exclude messages with \${opt}\`,
+                }),
+              )
+            }
+
+            const matchingDefs = NEGATIVE_FILTER_DEFINITIONS.filter(def =>
+              def.key.startsWith(lastToken.toLowerCase()),
+            ).map(def => ({
+              token: def.key,
+              label: def.key,
+              description: def.hint,
+            }))
+
+            return matchingDefs.length > 0
+              ? [...matchingDefs, ...(Array.isArray(suggestions) ? suggestions : [])]
+              : suggestions
+          }),
+        )
+      },
+      { max: 1 },
+    ),
+  )
+
+  unpatches.push(
+    getModules(
+      withProps<{ SearchFilterOptions: any }>('SearchFilterOptions'),
+      ({ SearchFilterOptions }) => {
+        unpatches.push(
+          insteadJSX(SearchFilterOptions, ([type, props, key], jsx) => {
+            const rendered = jsx(type, props, key)
+            const query = typeof props?.query === 'string' ? props.query : ''
+            const onUpdateQuery =
+              props?.onChangeText ?? props?.onSelectFilter ?? props?.setQuery
+
+            return (
+              <View>
+                {rendered}
+                <NegativeFilterMenuExtension
+                  query={query}
+                  onUpdateQuery={onUpdateQuery}
+                />
+              </View>
+            )
+          }),
+        )
       },
       { max: 1 },
     ),
@@ -1133,7 +859,7 @@ export function patchCommands(): () => void {
     language: 'json',
     summary: 'Template root package.json wired to @valenced/plugin-cli and @valenced/types.',
     content: `{
-  "name": "@valenced/mention-block-repo",
+  "name": "@valenced/negative-search-filters-repo",
   "private": true,
   "type": "module",
   "scripts": {
@@ -1161,7 +887,7 @@ export function patchCommands(): () => void {
     language: 'json',
     summary: 'Repository index metadata matching Valenced/valenced-plugin-template.',
     content: `{
-  "name": "Mention Block Repository",
+  "name": "Negative Search Filters Repository",
   "description": "Valenced plugin repository by horndogcop.",
   "channels": {}
 }

@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "com.valenced.negative-search-filters",
+  "name": "Negative Search Filters",
+  "description": "Adds repeatable client-side negative inline search filters (-from:, -in:, -has:image, -has:embed, etc.) to Discord mobile search.",
+  "author": "horndogcop",
+  "version": "1.0.0",
+  "dependencies": {
+    "valenced.api": {
+      "version": ">=1 <2"
+    },
+    "discord": {
+      "version": "*"
+    }
+  },
+  "dist": {
+    "script": "index.js"
+  }
+}
