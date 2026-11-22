@@ -1,3 +1,5 @@
+NONE IF THIS SLOP WORKS. fuck gemini
+
 # Valenced Plugins by horndogcop
 
 A collection of custom plugins for [Valenced](https://github.com/Valenced/valenced) (Discord mobile mod), built using the [`valenced-plugin-template`](https://github.com/Valenced/valenced-plugin-template) structure, with an automated GitHub Pages build pipeline.
